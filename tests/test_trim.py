@@ -175,6 +175,40 @@ def test_build_plan_single_move_action_shape(cfg: Config, workspace_dir: Path) -
     )
 
 
+def test_breadcrumb_relative_path_for_named_workspace(
+    cfg: Config, workspace_dir: Path
+) -> None:
+    """A bootstrap in a named (non-primary) workspace gets a breadcrumb
+    whose link actually resolves to the shared card dir.
+
+    The card still lands in ``cfg.cards_dir`` (``<ws>/memory/cards``), but
+    the bootstrap lives one directory deeper at ``<ws>/workspace-claude/``,
+    so the link must climb out with ``../`` instead of the hardcoded
+    ``memory/cards/...``.
+    """
+    named_dir = workspace_dir / "workspace-claude"
+    named_dir.mkdir()
+    bs = write_bootstrap(
+        named_dir,
+        "AGENTS.md",
+        "## Old Setup\nsome body content\nmore content\n",
+    )
+    sec = make_section(bs, body="some body content\nmore content", start_line=1, end_line=3)
+    plan = build_plan([make_verdict(sec)], cfg, today_iso=TODAY)
+    action = plan[0]
+    # Card still lives in the shared cards dir.
+    assert action.card_path == cfg.cards_dir / "old-setup-notes.md"
+    # Breadcrumb link climbs out of the named workspace to reach it.
+    assert action.breadcrumb_line == (
+        "- See [Old Setup Notes](../memory/cards/old-setup-notes.md)"
+        " - Notes about the old setup process."
+    )
+    # And the link, resolved from the bootstrap's own directory, points
+    # at the real card path on disk.
+    link = action.breadcrumb_line.split("](", 1)[1].split(")", 1)[0]
+    assert (bs.parent / link).resolve() == action.card_path.resolve()
+
+
 def test_card_body_has_required_frontmatter_keys(cfg: Config, workspace_dir: Path) -> None:
     bs = write_bootstrap(workspace_dir, "TOOLS.md", "## Old\nbody\n")
     sec = make_section(bs, body="body")

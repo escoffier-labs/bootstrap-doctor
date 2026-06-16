@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import datetime as dt
 import difflib
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -213,10 +214,32 @@ def _render_card_body(verdict: Verdict, today_iso: str) -> str:
     return out
 
 
-def _render_breadcrumb(verdict: Verdict, slug: str) -> str:
+def _card_link_target(card_path: Path, bootstrap_path: Path) -> str:
+    """Relative markdown link target from a bootstrap file to its card.
+
+    The breadcrumb is written INTO ``bootstrap_path`` and must point at
+    ``card_path``, so the link is computed relative to the bootstrap
+    file's own directory, not hardcoded to ``memory/cards/<slug>.md``.
+
+    For the primary workspace (bootstrap at ``<ws>/AGENTS.md``, card at
+    ``<ws>/memory/cards/<slug>.md``) this resolves to the familiar
+    ``memory/cards/<slug>.md``. For a named workspace (bootstrap at
+    ``<ws>/workspace-claude/AGENTS.md``) it resolves to
+    ``../memory/cards/<slug>.md`` instead, which actually points at the
+    card on disk. Always rendered with forward slashes so the link is
+    valid markdown regardless of the host OS.
+    """
+    rel = os.path.relpath(card_path, start=bootstrap_path.parent)
+    return Path(rel).as_posix()
+
+
+def _render_breadcrumb(
+    verdict: Verdict, card_path: Path, bootstrap_path: Path
+) -> str:
     """One-line breadcrumb that replaces the section body.
 
-    Format: ``- See [<topic>](memory/cards/<slug>.md) - <hook>``. Note the
+    Format: ``- See [<topic>](<rel>) - <hook>`` where ``<rel>`` is the
+    path to the card relative to the bootstrap file's directory. Note the
     regular-hyphen separator. No em dashes anywhere in user-facing output
     (see global writing conventions).
 
@@ -227,7 +250,8 @@ def _render_breadcrumb(verdict: Verdict, slug: str) -> str:
     """
     safe_topic = _flatten_to_single_line(verdict.topic)
     safe_hook = _flatten_to_single_line(verdict.hook)
-    return f"- See [{safe_topic}](memory/cards/{slug}.md) - {safe_hook}"
+    link = _card_link_target(card_path, bootstrap_path)
+    return f"- See [{safe_topic}]({link}) - {safe_hook}"
 
 
 def _derive_slug(verdict: Verdict) -> str | None:
@@ -387,11 +411,11 @@ def build_plan(
             )
             continue
 
-        # When renaming bumped the slug we want the breadcrumb to point
-        # at the actual file we'll write.
-        final_slug = card_path.stem
+        # When renaming bumped the slug the breadcrumb points at the
+        # actual file we'll write; the link is computed relative to the
+        # bootstrap file so named-workspace files get a correct path.
         card_body = _render_card_body(verdict, today_iso)
-        breadcrumb = _render_breadcrumb(verdict, final_slug)
+        breadcrumb = _render_breadcrumb(verdict, card_path, bootstrap_path)
 
         actions.append(
             TrimAction(
@@ -708,8 +732,11 @@ def _resolve_collision_at_apply(
             candidate = parent / f"{stem}-{i}.md"
             if candidate in claimed_in_run or candidate.exists():
                 continue
-            # Re-derive the breadcrumb to point at the renamed slug.
-            new_breadcrumb = _render_breadcrumb(action.verdict, candidate.stem)
+            # Re-derive the breadcrumb to point at the renamed card,
+            # relative to the bootstrap file that will hold it.
+            new_breadcrumb = _render_breadcrumb(
+                action.verdict, candidate, action.bootstrap_path
+            )
             return candidate, new_breadcrumb
         return None
 
