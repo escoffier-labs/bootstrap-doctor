@@ -1,16 +1,31 @@
-# bootstrap-doctor
+<h1 align="center">bootstrap-doctor</h1>
 
-bootstrap file doctor for OpenClaw. Audits the bootstrap markdown files that get loaded into every session prefix, flags sections that should move out, and rewrites the originals with one-line breadcrumbs to the relocated content.
+<p align="center">
+  <strong>A CLI that audits and trims the OpenClaw bootstrap files that load into every session prefix, before one silently truncates mid-session and drops your context with no error.</strong>
+</p>
 
-## Why
+<p align="center">
+  <img src="https://img.shields.io/github/actions/workflow/status/escoffier-labs/bootstrap-doctor/ci.yml?branch=main&style=for-the-badge&label=ci" alt="CI status">
+  <img src="https://img.shields.io/pypi/v/bootstrap-doctor?style=for-the-badge&label=pypi" alt="PyPI version">
+  <img src="https://img.shields.io/badge/python-3.11%2B-blue?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.11+">
+  <img src="https://img.shields.io/badge/license-MIT-green?style=for-the-badge" alt="MIT license">
+</p>
 
-OpenClaw bootstrap files (`AGENTS.md`, `TOOLS.md`, `SOUL.md`, `USER.md`, `SAFETY_RULES.md`, `IDENTITY.md`, `HEARTBEAT.md`, `MEMORY.md`) load into the session prefix on every turn. There is an empirical soft ceiling around 12,000 chars per file before content gets silently truncated mid-session, dropping bootstrap context with no error. Several files already brush that ceiling.
+<p align="center">
+  <a href="https://bootstrap-doctor.escoffierlabs.dev"><strong>Website</strong></a>
+  ·
+  <a href="https://pypi.org/project/bootstrap-doctor/">PyPI</a>
+  ·
+  <a href="#install">Install</a>
+  ·
+  <a href="#how-it-works">How it works</a>
+</p>
 
-Triple that across `workspace-claude`, `workspace-main`, and `workspace-researcher` and the bloat surface multiplies. Today this is managed by hand: notice a file is too big, eyeball a section, copy it to `memory/cards/`, leave a breadcrumb. That gets skipped.
-
-bootstrap-doctor automates the audit-and-relocate loop. Originals stay short, offloaded sections live in `memory/cards/`, breadcrumbs in the original point at the card.
+bootstrap-doctor is a bootstrap-file doctor for OpenClaw: it audits the markdown files that get loaded into every session prefix, flags sections that should move out, and rewrites the originals with one-line breadcrumbs to the relocated content. It exists because those files brush an empirical ~12,000-char ceiling where content gets silently truncated mid-session, dropping bootstrap context with no error. Unlike a manual eyeball-and-copy pass or a generic linter, it ranks oversize sections with heuristics plus an LLM keep/move verdict, relocates the detail into `memory/cards/`, and stays dry-run by default so it never loses content.
 
 ## What it does
+
+bootstrap-doctor keeps OpenClaw bootstrap files (`AGENTS.md`, `TOOLS.md`, `SOUL.md`, `USER.md`, `SAFETY_RULES.md`, `IDENTITY.md`, `HEARTBEAT.md`, `MEMORY.md`) under the session-prefix size budget. These files load into the prefix on every turn, and there is an empirical soft ceiling around 12,000 chars per file before content gets silently truncated, dropping bootstrap context with no error. bootstrap-doctor audits each tracked file, scores oversize sections, and relocates the reference-detail ones into memory cards with a breadcrumb left behind, so originals stay short and nothing is lost.
 
 Three subcommands, dry-run by default:
 
@@ -201,6 +216,26 @@ bootstrap-doctor runs a four-stage pipeline.
 - Verdict cache is local-only (`~/.cache/bootstrap-doctor/verdicts.json`). Clear with `--no-cache`.
 - Card-write failures abort before bootstrap files are rewritten, so a failed run cannot leave breadcrumbs pointing at missing cards.
 
+## Why not something else?
+
+- **A manual eyeball-and-copy pass** is the status quo: notice a file is too big, read a section, copy it to `memory/cards/`, leave a breadcrumb by hand. It gets skipped under load, and the file you miss is the one that truncates. bootstrap-doctor automates the audit-and-relocate loop and stays dry-run so you can review the plan first.
+- **A generic markdown or prose linter** measures readability, not the OpenClaw session-prefix budget. It does not know which files load every turn, where the soft/hard ceilings sit, or which sections are active rules versus reference detail. bootstrap-doctor is built around exactly those limits and that keep/move distinction.
+- **`wc -c` plus a script** tells you a file is over budget but not *what* to move. The judgement of must-stay-loaded versus reference-detail is the hard part, which is why bootstrap-doctor pairs heuristics with an LLM verdict instead of a raw size cutoff.
+- **A hosted memory or context service** would mean shipping your bootstrap files off the machine. bootstrap-doctor reads and rewrites local files only; the one optional network call is to an LLM gateway you configure and point wherever you trust.
+
+## What bootstrap-doctor is not
+
+bootstrap-doctor is not a memory manager, a context-compression engine, or an OpenClaw replacement. It does one thing: keep bootstrap files under the prefix budget by relocating reference detail into cards.
+
+It does not:
+
+- summarize, rewrite, or compress your content (a moved section is copied verbatim into a card)
+- decide anything for you on `unsure` verdicts (those are reported, never auto-applied)
+- write anything without `--apply` (every verb is dry-run or read-only by default)
+- run in the background, on a schedule, or as a daemon (you run it when you want it)
+- touch files outside the workspace or `cards_dir` (slug traversal is guarded, writes are atomic)
+- send your files anywhere except the LLM gateway you explicitly configure for `audit`
+
 ## Development
 
 ```bash
@@ -214,4 +249,4 @@ pip-audit . --skip-editable
 
 ## License
 
-MIT
+MIT. See [LICENSE](LICENSE).
