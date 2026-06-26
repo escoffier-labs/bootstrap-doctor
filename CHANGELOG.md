@@ -1,5 +1,13 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- Project governance: `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`, and issue / pull-request templates.
+
+### Changed
+- README now leads with a recorded `bootstrap-doctor status` demo (`docs/assets/bootstrap-doctor-status.svg`, reproducible from `bootstrap-doctor-status.cast`) showing the size audit flag an oversized `SOUL.md`.
+
 ## [v0.2.0] - 2026-06-10
 
 First PyPI release.
