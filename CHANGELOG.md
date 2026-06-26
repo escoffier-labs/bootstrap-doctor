@@ -7,6 +7,8 @@
 
 ### Changed
 - README now leads with a recorded `bootstrap-doctor status` demo (`docs/assets/bootstrap-doctor-status.svg`, reproducible from `bootstrap-doctor-status.cast`) showing the size audit flag an oversized `SOUL.md`.
+- README adoption pass: centered title and one-line summary, CI / PyPI / Python / license badges, a Website link, a what/why/how-it-differs opening, and "Why not something else?" plus "What bootstrap-doctor is not" sections.
+- Pull-request template now includes a no-PII / content-guard checklist item.
 
 ## [v0.2.0] - 2026-06-10
 
