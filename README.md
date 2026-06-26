@@ -22,6 +22,12 @@ bootstrap-doctor trim [--apply]      # apply the audit plan: write cards, replac
 
 `status` and `audit` are read-only. They can run even if `cards_dir` does not exist yet. `trim` defaults to dry-run; pass `--apply` to actually write.
 
+<p align="center">
+  <img src="docs/assets/bootstrap-doctor-status.svg" alt="Recording: bootstrap-doctor status reports every bootstrap file's size against the soft and hard limits and flags an oversized SOUL.md as over the hard limit" width="720">
+</p>
+
+`status` reports every tracked file against the soft and hard limits in one read-only pass, so the file about to silently truncate your session prefix (here, an oversized `SOUL.md`) is obvious before it bites.
+
 ## Install
 
 From PyPI:

@@ -1,0 +1,36 @@
+name: Bug report
+description: bootstrap-doctor reported wrong, mangled a file, or errored
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Use a synthetic workspace.** Don't paste real bootstrap files; small made-up files that reproduce are ideal.
+  - type: input
+    id: version
+    attributes:
+      label: bootstrap-doctor version
+      placeholder: "0.2.0 (bootstrap-doctor --version)"
+    validations:
+      required: true
+  - type: dropdown
+    id: command
+    attributes:
+      label: Which command
+      options: [status, audit, trim]
+    validations:
+      required: true
+  - type: textarea
+    id: workspace
+    attributes:
+      label: Workspace (synthetic)
+      description: The smallest set of bootstrap files that reproduces it (sizes / names).
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected vs. actual
+    validations:
+      required: true
