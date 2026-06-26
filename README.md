@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/assets/bootstrap-doctor-social-preview.jpg" alt="bootstrap-doctor banner" width="900">
+</p>
+
 <h1 align="center">bootstrap-doctor</h1>
 
 <p align="center">
