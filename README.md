@@ -9,13 +9,6 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/github/actions/workflow/status/escoffier-labs/bootstrap-doctor/ci.yml?branch=main&style=for-the-badge&label=ci" alt="CI status">
-  <img src="https://img.shields.io/pypi/v/bootstrap-doctor?style=for-the-badge&label=pypi" alt="PyPI version">
-  <img src="https://img.shields.io/badge/python-3.11%2B-blue?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.11+">
-  <img src="https://img.shields.io/badge/license-MIT-green?style=for-the-badge" alt="MIT license">
-</p>
-
-<p align="center">
   <a href="https://bootstrap-doctor.escoffierlabs.dev"><strong>Website</strong></a>
   ·
   <a href="https://pypi.org/project/bootstrap-doctor/">PyPI</a>
@@ -25,7 +18,20 @@
   <a href="#how-it-works">How it works</a>
 </p>
 
+<p align="center">
+  <img src="https://img.shields.io/github/actions/workflow/status/escoffier-labs/bootstrap-doctor/ci.yml?branch=main&style=for-the-badge&label=ci" alt="CI status">
+  <img src="https://img.shields.io/pypi/v/bootstrap-doctor?style=for-the-badge&label=pypi" alt="PyPI version">
+  <img src="https://img.shields.io/badge/python-3.11%2B-blue?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.11+">
+  <img src="https://img.shields.io/badge/license-MIT-green?style=for-the-badge" alt="MIT license">
+</p>
+
 bootstrap-doctor is a bootstrap-file doctor for OpenClaw: it audits the markdown files that get loaded into every session prefix, flags sections that should move out, and rewrites the originals with one-line breadcrumbs to the relocated content. It exists because those files brush an empirical ~12,000-char ceiling where content gets silently truncated mid-session, dropping bootstrap context with no error. Unlike a manual eyeball-and-copy pass or a generic linter, it ranks oversize sections with heuristics plus an LLM keep/move verdict, relocates the detail into `memory/cards/`, and stays dry-run by default so it never loses content.
+
+<p align="center">
+  <img src="docs/assets/bootstrap-doctor-status.svg" alt="Recording: bootstrap-doctor status reports every bootstrap file's size against the soft and hard limits and flags an oversized SOUL.md as over the hard limit" width="720">
+</p>
+
+`status` reports every tracked file against the soft and hard limits in one read-only pass, so the file about to silently truncate your session prefix (here, an oversized `SOUL.md`) is obvious before it bites.
 
 ## What it does
 
@@ -40,12 +46,6 @@ bootstrap-doctor trim [--apply]      # apply the audit plan: write cards, replac
 ```
 
 `status` and `audit` are read-only. They can run even if `cards_dir` does not exist yet. `trim` defaults to dry-run; pass `--apply` to actually write.
-
-<p align="center">
-  <img src="docs/assets/bootstrap-doctor-status.svg" alt="Recording: bootstrap-doctor status reports every bootstrap file's size against the soft and hard limits and flags an oversized SOUL.md as over the hard limit" width="720">
-</p>
-
-`status` reports every tracked file against the soft and hard limits in one read-only pass, so the file about to silently truncate your session prefix (here, an oversized `SOUL.md`) is obvious before it bites.
 
 ## Install
 
@@ -124,32 +124,6 @@ $ bootstrap-doctor trim --apply
 
 `unsure` verdicts are never auto-applied. They show up in audit output for manual review.
 
-## Config
-
-`~/.config/bootstrap-doctor/config.toml`:
-
-```toml
-workspace_dir = "~/.openclaw/workspace"
-cards_dir = "~/.openclaw/workspace/memory/cards"
-gateway_url = "http://localhost:11434"
-gateway_model = "deepseek-v4-pro:cloud"
-soft_limit = 10000
-hard_limit = 11500
-tracked_files = [
-  "AGENTS.md", "TOOLS.md", "SOUL.md", "USER.md",
-  "SAFETY_RULES.md", "IDENTITY.md", "HEARTBEAT.md", "MEMORY.md",
-]
-named_workspaces = ["workspace-claude", "workspace-main", "workspace-researcher"]
-
-[heuristics]
-min_section_chars = 400
-stale_days = 60
-```
-
-Layering: built-in defaults, then config file, then env vars, then CLI flags.
-
-Path-like values must be non-empty strings without control characters or leading/trailing whitespace. `tracked_files` and `named_workspaces` must be local names, not paths.
-
 ## How it works
 
 ```mermaid
@@ -210,6 +184,32 @@ bootstrap-doctor runs a four-stage pipeline.
 2. **Heuristic shortlist.** Flags sections that look offload-worthy: body > 400 chars, contains a code block > 10 lines, no git touch in 60+ days, or duplicated across multiple tracked files.
 3. **LLM judge.** For each shortlisted section, POSTs to an OpenAI-compatible chat-completions endpoint (default `http://localhost:11434`, Ollama) with a structured prompt asking whether the section is *must-stay-loaded* (active rules, identity, currently-relevant state) or *reference-detail* (historical, exemplar, one-off setup). Verdict is one of `keep`, `move`, or `unsure`. Token budget capped per run; verdicts cached by SHA256 of section body in `~/.cache/bootstrap-doctor/verdicts.json`. Any OpenAI-compatible endpoint works (Ollama, OpenAI, vLLM, etc.); set `gateway_url` and `gateway_model` in config.
 4. **Trim plan.** For each `move` verdict, writes a card to `memory/cards/<slug>.md` with the existing frontmatter convention, replaces the section in the original with a one-line breadcrumb pointing at the card. `keep` is a no-op. `unsure` is reported but never auto-applied.
+
+## Config
+
+`~/.config/bootstrap-doctor/config.toml`:
+
+```toml
+workspace_dir = "~/.openclaw/workspace"
+cards_dir = "~/.openclaw/workspace/memory/cards"
+gateway_url = "http://localhost:11434"
+gateway_model = "deepseek-v4-pro:cloud"
+soft_limit = 10000
+hard_limit = 11500
+tracked_files = [
+  "AGENTS.md", "TOOLS.md", "SOUL.md", "USER.md",
+  "SAFETY_RULES.md", "IDENTITY.md", "HEARTBEAT.md", "MEMORY.md",
+]
+named_workspaces = ["workspace-claude", "workspace-main", "workspace-researcher"]
+
+[heuristics]
+min_section_chars = 400
+stale_days = 60
+```
+
+Layering: built-in defaults, then config file, then env vars, then CLI flags.
+
+Path-like values must be non-empty strings without control characters or leading/trailing whitespace. `tracked_files` and `named_workspaces` must be local names, not paths.
 
 ## Safety
 
