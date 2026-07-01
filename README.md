@@ -19,10 +19,10 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/github/actions/workflow/status/escoffier-labs/bootstrap-doctor/ci.yml?branch=main&style=for-the-badge&label=ci" alt="CI status">
-  <img src="https://img.shields.io/pypi/v/bootstrap-doctor?style=for-the-badge&label=pypi" alt="PyPI version">
-  <img src="https://img.shields.io/badge/python-3.11%2B-blue?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.11+">
-  <img src="https://img.shields.io/badge/license-MIT-green?style=for-the-badge" alt="MIT license">
+  <img src="https://shieldcn.dev/github/ci/escoffier-labs/bootstrap-doctor.svg?branch=main&workflow=ci.yml" alt="CI status">
+  <img src="https://shieldcn.dev/pypi/bootstrap-doctor.svg" alt="PyPI version">
+  <img src="https://shieldcn.dev/badge/python-3.11%2B-blue.svg?logo=python&logoColor=white" alt="Python 3.11+">
+  <img src="https://shieldcn.dev/badge/license-MIT-green.svg" alt="MIT license">
 </p>
 
 bootstrap-doctor is a bootstrap-file doctor for OpenClaw: it audits the markdown files that get loaded into every session prefix, flags sections that should move out, and rewrites the originals with one-line breadcrumbs to the relocated content. It exists because those files brush an empirical ~12,000-char ceiling where content gets silently truncated mid-session, dropping bootstrap context with no error. Unlike a manual eyeball-and-copy pass or a generic linter, it ranks oversize sections with heuristics plus an LLM keep/move verdict, relocates the detail into `memory/cards/`, and stays dry-run by default so it never loses content.
