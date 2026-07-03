@@ -31,6 +31,8 @@ bootstrap-doctor is a bootstrap-file doctor for OpenClaw: it audits the markdown
   <img src="docs/assets/bootstrap-doctor-status.svg" alt="Recording: bootstrap-doctor status reports every bootstrap file's size against the soft and hard limits and flags an oversized SOUL.md as over the hard limit" width="720">
 </p>
 
+<p align="center"><em><code>bootstrap-doctor status</code> checks every bootstrap file against its token budget and flags the one over the line.</em></p>
+
 `status` reports every tracked file against the soft and hard limits in one read-only pass, so the file about to silently truncate your session prefix (here, an oversized `SOUL.md`) is obvious before it bites.
 
 ## What it does
