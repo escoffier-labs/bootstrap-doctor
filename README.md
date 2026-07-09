@@ -1,77 +1,47 @@
 <p align="center">
-  <img src="docs/assets/bootstrap-doctor-social-preview.jpg" alt="bootstrap-doctor banner" width="900">
+  <img src="docs/assets/bootstrap-doctor-social-preview.jpg" alt="Bootstrap Doctor banner" width="900">
 </p>
 
-<h1 align="center">bootstrap-doctor</h1>
+<h1 align="center">Bootstrap Doctor</h1>
 
 <p align="center">
-  <strong>A CLI that audits and trims the OpenClaw bootstrap files that load into every session prefix, before one silently truncates mid-session and drops your context with no error.</strong>
+  <img src="docs/assets/marks/bootstrap-doctor-circle.svg" alt="" width="40" height="40">
 </p>
 
 <p align="center">
-  <a href="https://bootstrap-doctor.escoffierlabs.dev"><strong>Website</strong></a>
-  ·
-  <a href="https://pypi.org/project/bootstrap-doctor/">PyPI</a>
-  ·
-  <a href="#install">Install</a>
-  ·
-  <a href="#how-it-works">How it works</a>
+  <strong>Oversized bootstrap files silently truncate. Doctor trims them before the session starts broken.</strong>
+</p>
+
+<p align="center">
+  Audit and trim OpenClaw (and similar) bootstrap files against soft and hard char limits. Heuristics plus optional LLM judgment. Dry-run first.
+</p>
+
+<p align="center">
+  <a href="https://brigade.tools/bootstrap-doctor">Website</a> &middot; <a href="#install">Install</a>
 </p>
 
 <p align="center">
   <img src="https://shieldcn.dev/github/ci/escoffier-labs/bootstrap-doctor.svg?branch=main&workflow=ci.yml" alt="CI status">
-  <img src="https://shieldcn.dev/pypi/bootstrap-doctor.svg" alt="PyPI version">
-  <img src="https://shieldcn.dev/badge/python-3.11%2B-blue.svg?logo=python&logoColor=white" alt="Python 3.11+">
   <img src="https://shieldcn.dev/badge/license-MIT-green.svg" alt="MIT license">
 </p>
 
-bootstrap-doctor is a bootstrap-file doctor for OpenClaw: it audits the markdown files that get loaded into every session prefix, flags sections that should move out, and rewrites the originals with one-line breadcrumbs to the relocated content. It exists because those files brush an empirical ~12,000-char ceiling where content gets silently truncated mid-session, dropping bootstrap context with no error. Unlike a manual eyeball-and-copy pass or a generic linter, it ranks oversize sections with heuristics plus an LLM keep/move verdict, relocates the detail into `memory/cards/`, and stays dry-run by default so it never loses content.
+## Install
 
-<p align="center">
-  <img src="docs/assets/bootstrap-doctor-status.svg" alt="Recording: bootstrap-doctor status reports every bootstrap file's size against the soft and hard limits and flags an oversized SOUL.md as over the hard limit" width="720">
-</p>
-
-<p align="center"><em><code>bootstrap-doctor status</code> checks every bootstrap file against its token budget and flags the one over the line.</em></p>
-
-`status` reports every tracked file against the soft and hard limits in one read-only pass, so the file about to silently truncate your session prefix (here, an oversized `SOUL.md`) is obvious before it bites.
+```bash
+pipx install git+https://github.com/escoffier-labs/bootstrap-doctor
+bootstrap-doctor status
+bootstrap-doctor audit
+bootstrap-doctor trim --dry-run
+```
 
 ## What it does
 
-bootstrap-doctor keeps OpenClaw bootstrap files (`AGENTS.md`, `TOOLS.md`, `SOUL.md`, `USER.md`, `SAFETY_RULES.md`, `IDENTITY.md`, `HEARTBEAT.md`, `MEMORY.md`) under the session-prefix size budget. These files load into the prefix on every turn, and there is an empirical soft ceiling around 12,000 chars per file before content gets silently truncated, dropping bootstrap context with no error. bootstrap-doctor audits each tracked file, scores oversize sections, and relocates the reference-detail ones into memory cards with a breadcrumb left behind, so originals stay short and nothing is lost.
+| | Job | What you get |
+|---|---|---|
+| **Measure** | Every bootstrap surface | Size vs soft and hard limits |
+| **Audit** | What should move out | Heuristic shortlist; optional LLM judge |
+| **Trim** | Reference cards, not silent cut | Dry-run plan first; --apply after review |
 
-Three subcommands, dry-run by default:
-
-```
-bootstrap-doctor status              # read-only summary of every tracked file
-bootstrap-doctor audit               # heuristic shortlist plus LLM verdicts (keep / move / unsure)
-bootstrap-doctor trim [--apply]      # apply the audit plan: write cards, replace sections with breadcrumbs
-```
-
-`status` and `audit` are read-only. They can run even if `cards_dir` does not exist yet. `trim` defaults to dry-run; pass `--apply` to actually write.
-
-## Install
-
-From PyPI:
-
-```bash
-pipx install bootstrap-doctor
-```
-
-From a local clone:
-
-```bash
-git clone https://github.com/escoffier-labs/bootstrap-doctor
-cd bootstrap-doctor
-pipx install -e .
-```
-
-Requires Python 3.11+. Runtime dep: `requests` (used by the gateway client).
-
-The bootstrap size limits (soft / hard / ceiling) are owned by [`brigade`](https://github.com/escoffier-labs/brigade) via `brigade.budgets`. bootstrap-doctor ships a mirrored fallback so it runs standalone without brigade installed. To source the limits from brigade directly and stay in lockstep with the rest of the tooling, install the optional extra:
-
-```bash
-pipx install "bootstrap-doctor[brigade]"
-```
 
 ## Usage
 
