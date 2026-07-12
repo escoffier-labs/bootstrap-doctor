@@ -76,3 +76,23 @@ if [[ "$FAIL" -ne 0 ]]; then
   } >&2
   exit 1
 fi
+
+# Verify-receipt gate: every pushed tip must have a passing Brigade verify
+# receipt (written by ./scripts/verify when brigade is installed). This is the
+# fail-closed half of the outcome loop: green tests that never produced a
+# receipt do not count. Escape hatch for receipt-less pushes (e.g. pushing a
+# WIP branch for backup): SKIP_VERIFY_RECEIPT=1 git push
+if [[ "${SKIP_VERIFY_RECEIPT:-0}" != "1" ]]; then
+  while read -r _lref lsha _rref _rsha; do
+    [[ -z "${lsha:-}" || "$lsha" == "$ZERO" ]] && continue   # branch deletion
+    if ! "$REPO_ROOT/scripts/check-verify-receipt" "$lsha"; then
+      {
+        echo
+        echo "pre-push: BLOCKED. No passing verify receipt for $lsha."
+        echo "pre-push: Run ./scripts/verify on that commit, then push again."
+        echo "pre-push: Pushing a WIP branch without verification: SKIP_VERIFY_RECEIPT=1 git push"
+      } >&2
+      exit 1
+    fi
+  done < <(printf '%s\n' "$STDIN_REFS")
+fi
