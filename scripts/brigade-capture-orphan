@@ -1,0 +1,67 @@
+#!/usr/bin/env python3
+"""Capture an outcome for the newest verify receipt that has none.
+
+Intended as a session-end hook (for example a Claude Code Stop hook): if the
+most recent run under .brigade/work/verify-runs/ has no matching record in
+memory/outcome/records.jsonl, run `brigade outcome capture` against it so
+manual `brigade work verify run` invocations without --capture still feed the
+ledger. Always exits 0; a hook must never block session end.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+CAPTURE_ID = os.environ.get("BOOTSTRAP_DOCTOR_CAPTURE_ID", "brigade-work")
+
+
+def main() -> int:
+    root = Path(__file__).resolve().parent.parent
+    runs_dir = root / ".brigade" / "work" / "verify-runs"
+    records_path = root / "memory" / "outcome" / "records.jsonl"
+    if not runs_dir.is_dir() or shutil.which("brigade") is None:
+        return 0
+
+    receipts = sorted(runs_dir.glob("*/receipt.json"))
+    if not receipts:
+        return 0
+    latest = receipts[-1]
+
+    captured: set[str] = set()
+    if records_path.is_file():
+        for line in records_path.read_text(encoding="utf-8").splitlines():
+            try:
+                record = json.loads(line)
+            except ValueError:
+                continue
+            ref = record.get("evidence_ref")
+            if isinstance(ref, str):
+                captured.add(ref)
+
+    if str(latest) in captured:
+        return 0
+
+    subprocess.run(
+        [
+            "brigade", "outcome", "capture", CAPTURE_ID,
+            "--run-id", "latest", "--kind", "skill",
+            "--target", str(root),
+        ],
+        check=False,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        timeout=30,
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except Exception:
+        sys.exit(0)
