@@ -1,0 +1,67 @@
+#!/usr/bin/env python3
+"""Pre-push gate: require a passing Brigade verify receipt for a pushed sha.
+
+Usage: check-verify-receipt <sha>
+
+Scans .brigade/work/verify-runs/*/receipt.json for receipts whose git.head
+matches <sha> and exits 0 only if the newest such receipt completed with
+every command at exit code 0. Receipts are written by ./scripts/verify when
+brigade is installed, so the fix for a failure here is always the same:
+run ./scripts/verify on the commit you are pushing.
+
+Exit codes: 0 receipt found and passing, 1 missing or failing receipt,
+2 usage error. The hook that calls this honors SKIP_VERIFY_RECEIPT=1 as a
+documented escape hatch; this script itself does not.
+"""
+
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+
+def main() -> int:
+    if len(sys.argv) != 2 or not sys.argv[1]:
+        print("usage: check-verify-receipt <sha>", file=sys.stderr)
+        return 2
+    sha = sys.argv[1]
+    runs_dir = Path(__file__).resolve().parent.parent / ".brigade" / "work" / "verify-runs"
+
+    matching: list[dict] = []
+    if runs_dir.is_dir():
+        for receipt_path in runs_dir.glob("*/receipt.json"):
+            try:
+                receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if isinstance(receipt, dict) and receipt.get("git", {}).get("head") == sha:
+                matching.append(receipt)
+
+    if not matching:
+        print(
+            f"check-verify-receipt: no verify receipt for {sha[:12]}. "
+            "Run ./scripts/verify (with brigade installed) and push again.",
+            file=sys.stderr,
+        )
+        return 1
+
+    newest = max(matching, key=lambda r: str(r.get("completed_at") or ""))
+    commands = newest.get("commands") or []
+    passed = (
+        newest.get("status") == "completed"
+        and bool(commands)
+        and all(c.get("exit_code") == 0 for c in commands)
+    )
+    if not passed:
+        print(
+            f"check-verify-receipt: newest verify receipt for {sha[:12]} did not pass. "
+            "Fix the failure, run ./scripts/verify, and push again.",
+            file=sys.stderr,
+        )
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,8 +1,27 @@
 #!/bin/bash
 # Single verification entrypoint. AGENTS.md's Definition of Done defers to
 # this file, so the gate lives in exactly one place.
+#
+# When brigade is on PATH, the run is routed through `brigade work verify run`
+# so it writes a signed receipt under .brigade/work/verify-runs/ and captures
+# the outcome in the same step. Without brigade (CI, fresh contributor
+# machines) it falls back to the raw test run, same exit code either way.
+#
+# Environment knobs:
+#   BOOTSTRAP_DOCTOR_RAW_VERIFY=1   skip the brigade wrapper (also set
+#                                   internally so the wrapped run cannot
+#                                   recurse back into brigade)
+#   BOOTSTRAP_DOCTOR_CAPTURE_ID=x   credit the outcome to skill/card id x
+#                                   instead of the default 'brigade-work'
 set -euo pipefail
 cd "$(dirname "$0")/.."
+
+if [[ "${BOOTSTRAP_DOCTOR_RAW_VERIFY:-0}" != "1" ]] && command -v brigade >/dev/null 2>&1; then
+  exec brigade work verify run --target . \
+    --argv-json '["env", "BOOTSTRAP_DOCTOR_RAW_VERIFY=1", "./scripts/verify"]' \
+    --capture "${BOOTSTRAP_DOCTOR_CAPTURE_ID:-brigade-work}" \
+    --capture-kind skill
+fi
 
 python3 -m pytest
 
