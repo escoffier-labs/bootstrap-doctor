@@ -15,7 +15,7 @@ Closes #
 
 ## Checklist
 
-- [ ] `scripts/verify` passes (lint, type-check, tests)
+- [ ] `scripts/verify` passes (full test suite; ruff, mypy, build, and pip-audit run in CI)
 - [ ] Added or updated tests covering the change
 - [ ] `trim` stays dry-run by default; `--apply` is still required to write
 - [ ] No real bootstrap content in tests or fixtures (synthetic samples only)

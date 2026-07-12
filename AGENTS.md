@@ -5,6 +5,7 @@
 ./scripts/verify
 ```
 Runs `python3 -m pytest` (the full suite, under a second; no install needed, pyproject sets `pythonpath = ["src"]`).
+When `brigade` is on PATH, the script routes the run through `brigade work verify run`, which writes a signed receipt under `.brigade/work/verify-runs/` and captures the outcome in one step; without brigade it falls back to raw pytest with the same exit code. `BOOTSTRAP_DOCTOR_CAPTURE_ID=<skill-id>` credits the outcome to the skill you actually followed (default `brigade-work`); `BOOTSTRAP_DOCTOR_RAW_VERIFY=1` forces the raw path.
 Before reporting ANY change complete, run it and pass, re-run after your final edit.
 Report the actual command output. If anything fails, report the failure verbatim and do not claim success.
 Ruff and mypy are configured in pyproject but not installed in the system Python; run them only after installing the `dev` extra in a venv. Never claim a lint or type check passed without having run it. CI runs pytest, ruff, mypy, build, wheel smoke test, and pip-audit on 3.11 and 3.12; do not break configs those steps read.
@@ -21,7 +22,7 @@ Ruff and mypy are configured in pyproject but not installed in the system Python
 - Failing test? Never weaken its assertions, skip it, xfail it, or delete it to get green. Fix the code, or report the failure and stop.
 - Unsure what a command, flag, or function does? Never guess or invent it. Read `cli.py`, the module source, or `docs/bootstrap-doctor-design.md` first, then cite what you found.
 - Blocked by sandboxing, auth, or a missing tool? Report the exact blocker (command + error) and stop. Do not silently work around it or substitute a fake result.
-- Pushing? The repo sets `core.hooksPath = hooks`, so `git push` runs `hooks/pre-push`, which scans the tree with content-guard against `~/repos/content-guard/policies/public-repo.json` and blocks on violations. Never push with `--no-verify`. On a block: fix the leak, or add an inline `<!-- content-guard: allow <rule-id> -->` tag on the offending line.
+- Pushing? The repo sets `core.hooksPath = hooks`, so `git push` runs `hooks/pre-push`, which runs `brigade guard git` (embedded public-repo policy from `brigade-cli`, plus optional private denylist at `~/.config/content-guard/internal.json`) and blocks on violations. It also blocks any pushed tip that lacks a passing verify receipt; the fix is `./scripts/verify` on that commit, and `SKIP_VERIFY_RECEIPT=1` is the documented escape hatch for WIP backup pushes. Never push with `--no-verify`. On a block: fix the leak, or add an inline `<!-- content-guard: allow <rule-id> -->` tag on the offending line.
 - Tempted to commit local artifacts? `implementation-notes.md`, `memory/`, and `.brigade/` are gitignored. Never commit them, and never delete `memory/cards/` contents.
 
 ## Verification
@@ -40,6 +41,13 @@ Ruff and mypy are configured in pyproject but not installed in the system Python
 - Changing CLI exits? Exit codes are contract: 0 ok, 1 soft-limit findings, 2 hard error (missing/unreadable file, over hard limit, bad config, dirty workspace on `--apply`).
 - Touching `parsing.py`? The section parser is code-fence aware and treats H4+ headings as body text, not section splits. Char counts are measured on LF-normalized text. Read the module docstrings and `docs/bootstrap-doctor-design.md` first.
 - Touching the verdict cache? Verdicts are cached by SHA256 of section body at `{cache_dir}/verdicts.json` (schema version 1). Failures and budget-exceeded results are deliberately not cached so retries re-ask the gateway. Keep both properties.
+
+## Brigade Work Loop
+This repo is Brigade-wired; the loop feeds itself as long as you use the standard entrypoints.
+- Session start: `brigade work brief --target .` shows pending work and warnings.
+- Verification: `./scripts/verify` already emits the receipt and captures the outcome (see Definition of Done). For a targeted check that should count, use `brigade work verify run --target . --command "python3 -m pytest tests/test_<module>.py"`. The command is split with shlex and run with shell=False: no `&&`, pipes, or `cd`; put shell logic in a script and pass the script.
+- Hit friction (blocked, reworked, misled by docs, tool failure)? Log it while it is fresh: `brigade friction add --target . --type <type> --severity <sev> --evidence "<pointer>" "<what happened>"`.
+- One verify, one capture; never invent outcomes. Capture failures too, the -1 signals drive rollback.
 
 ## Memory Handoff
 At the end of any substantial task, write a handoff note to `.claude/memory-handoffs/` using that directory's `TEMPLATE.md`.
