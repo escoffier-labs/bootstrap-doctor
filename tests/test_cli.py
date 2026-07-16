@@ -373,6 +373,31 @@ def test_audit_fails_closed_when_parse_breaks_after_preflight(
     assert "changed during audit" in captured.err.lower()
 
 
+def test_audit_fails_closed_when_required_file_disappears_after_preflight(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    workspace, cards = _mk_workspace(tmp_path)
+    required = workspace / "AGENTS.md"
+    required.write_text("## Present\nbody\n")
+    cfg_path = _write_config(tmp_path, workspace=workspace, cards=cards)
+    from bootstrap_doctor import status as status_mod
+
+    original_collect = status_mod.collect
+
+    def collect_then_remove(cfg: Config):
+        rows = original_collect(cfg)
+        required.unlink()
+        return rows
+
+    monkeypatch.setattr(status_mod, "collect", collect_then_remove)
+    code = cli_mod.main(["audit", "--config", str(cfg_path)])
+    captured = capsys.readouterr()
+    assert code == 2
+    assert "required bootstrap file disappeared" in captured.err.lower()
+
+
 def test_audit_hard_preamble_only_file_returns_two(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

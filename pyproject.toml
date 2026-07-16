@@ -66,9 +66,8 @@ no_implicit_optional = true
 warn_redundant_casts = true
 warn_unused_ignores = true
 
-# brigade is an optional dependency (the canonical source for the size budgets,
-# imported with a runtime fallback in bootstrap_doctor.budgets). Don't fail
-# typing when brigade-cli is not installed in the checkout.
+# Brigade remains an optional integration. Don't fail typing when brigade-cli
+# is not installed in the checkout.
 [[tool.mypy.overrides]]
 module = ["brigade.*"]
 ignore_missing_imports = true

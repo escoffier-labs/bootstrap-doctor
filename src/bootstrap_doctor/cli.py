@@ -222,6 +222,7 @@ def _collect_sections(cfg) -> list:
     knows which entry to remove.
     """
     from bootstrap_doctor.parsing import parse_file
+    from bootstrap_doctor.paths import DEFAULT_OPTIONAL_TRACKED_FILES
     from bootstrap_doctor.safety import UnsafeTargetError, ensure_within
 
     sections: list = []
@@ -236,12 +237,14 @@ def _collect_sections(cfg) -> list:
         scopes.append((name, resolved))
 
     for _label, ws_dir in scopes:
-        if not ws_dir.is_dir():
-            continue
         for name in cfg.tracked_files:
             path = ws_dir / name
-            if not path.exists() or not path.is_file():
-                continue
+            if not path.exists():
+                if name in DEFAULT_OPTIONAL_TRACKED_FILES:
+                    continue
+                raise OSError(f"required bootstrap file disappeared: {path}")
+            if not path.is_file():
+                raise OSError(f"required bootstrap path is not a file: {path}")
             sections.extend(parse_file(path))
     return sections
 
