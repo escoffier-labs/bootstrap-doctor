@@ -17,7 +17,7 @@ TOML schema:
     soft_limit = 17000
     hard_limit = 20000
     total_limit = 60000
-    tracked_files = ["AGENTS.md", "SOUL.md", "TOOLS.md"]
+    tracked_files = ["AGENTS.md", "SOUL.md", "TOOLS.md", "IDENTITY.md", "USER.md", "HEARTBEAT.md", "BOOTSTRAP.md", "MEMORY.md"]
     named_workspaces = ["workspace-claude", "workspace-main"]
 
     [heuristics]
@@ -85,7 +85,16 @@ DEFAULT_TRACKED_FILES: list[str] = [
     "BOOTSTRAP.md",
     "MEMORY.md",
 ]
-DEFAULT_OPTIONAL_TRACKED_FILES = frozenset({"BOOTSTRAP.md", "MEMORY.md"})
+DEFAULT_OPTIONAL_TRACKED_FILES = frozenset(
+    {
+        "SOUL.md",
+        "IDENTITY.md",
+        "USER.md",
+        "HEARTBEAT.md",
+        "BOOTSTRAP.md",
+        "MEMORY.md",
+    }
+)
 DEFAULT_NAMED_WORKSPACES: list[str] = []
 DEFAULT_MIN_SECTION_CHARS = 400
 DEFAULT_STALE_DAYS = 60

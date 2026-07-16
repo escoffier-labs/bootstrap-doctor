@@ -134,7 +134,7 @@ stale_days = 60
 
 Layering: built-in defaults, then config file, then env vars, then CLI flags.
 
-Path-like values must be non-empty strings without control characters or leading/trailing whitespace. `tracked_files` and `named_workspaces` must be unique local names, not paths. Missing `BOOTSTRAP.md` and `MEMORY.md` are optional because OpenClaw may omit them after setup or when long-term memory is disabled. Other configured files are required.
+Path-like values must be non-empty strings without control characters or leading/trailing whitespace. `tracked_files` and `named_workspaces` must be unique local names, not paths. Missing `SOUL.md`, `IDENTITY.md`, `USER.md`, `HEARTBEAT.md`, `BOOTSTRAP.md`, and `MEMORY.md` are optional because OpenClaw may omit them after setup or when long-term memory is disabled. Other configured files are required.
 
 ## Safety
 

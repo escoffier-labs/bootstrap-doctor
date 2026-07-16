@@ -209,8 +209,8 @@ def run_status(args: argparse.Namespace) -> int:
 # ---------------------------------------------------------------------------
 
 
-def _collect_sections(cfg) -> list:
-    """Walk every (workspace, tracked_file) pair and parse every file.
+def _collect_sections(cfg, snapshots) -> list:
+    """Parse the exact boundary-checked snapshots used for measurement.
 
     Returns one flat list of Section across all workspaces. Missing optional
     files are skipped. Read and decode failures propagate so the audit
@@ -221,31 +221,23 @@ def _collect_sections(cfg) -> list:
     message is rewrapped to include the offending name so the user
     knows which entry to remove.
     """
-    from bootstrap_doctor.parsing import parse_file
+    from bootstrap_doctor.parsing import parse_text
     from bootstrap_doctor.paths import DEFAULT_OPTIONAL_TRACKED_FILES
-    from bootstrap_doctor.safety import UnsafeTargetError, ensure_within
+    from bootstrap_doctor.status import validate_snapshot
 
     sections: list = []
-    scopes: list[tuple[str, Path]] = [("workspace", cfg.workspace_dir)]
-    for name in cfg.named_workspaces:
-        try:
-            resolved = ensure_within(cfg.workspace_dir, cfg.workspace_dir / name)
-        except UnsafeTargetError as exc:
-            raise UnsafeTargetError(
-                f"named workspace {name!r} resolves outside workspace_dir: {exc}"
-            ) from exc
-        scopes.append((name, resolved))
-
-    for _label, ws_dir in scopes:
-        for name in cfg.tracked_files:
-            path = ws_dir / name
-            if not path.exists():
-                if name in DEFAULT_OPTIONAL_TRACKED_FILES:
-                    continue
-                raise OSError(f"required bootstrap file disappeared: {path}")
-            if not path.is_file():
-                raise OSError(f"required bootstrap path is not a file: {path}")
-            sections.extend(parse_file(path))
+    for snapshot in snapshots:
+        if not snapshot.exists:
+            if snapshot.name in DEFAULT_OPTIONAL_TRACKED_FILES:
+                continue
+            raise OSError(
+                f"required bootstrap file disappeared: {snapshot.path}"
+            )
+        if snapshot.text is None:
+            raise OSError(f"required bootstrap file is unreadable: {snapshot.path}")
+        sections.extend(parse_text(snapshot.text, snapshot.path))
+    for snapshot in snapshots:
+        validate_snapshot(cfg, snapshot)
     return sections
 
 
@@ -325,14 +317,13 @@ def _render_audit_json(rows: list[tuple], cfg) -> str:
 
 def _run_audit_pipeline(
     args: argparse.Namespace, cfg
-) -> tuple[list, list, Any, set[Path]] | int:
-    """Shared between audit and trim. Returns candidates, verdicts, stats, hard files,
-    or an int exit code if there's nothing to do."""
+) -> tuple[list, list, Any, set[Path], set[Path]] | int:
+    """Return audit results plus hard files and hard aggregate workspaces."""
     from bootstrap_doctor import judge as judge_mod
     from bootstrap_doctor import status as status_mod
     from bootstrap_doctor.heuristics import Candidate, shortlist
 
-    measurements = status_mod.collect(cfg)
+    measurements, snapshots = status_mod.collect_with_snapshots(cfg)
     unsafe = [
         row
         for row in measurements
@@ -348,16 +339,21 @@ def _run_audit_pipeline(
     hard_paths = {
         row.path for row in measurements if row.severity == status_mod.SEV_HARD
     }
+    hard_workspaces = {
+        total.path
+        for total in status_mod.collect_totals(measurements, cfg)
+        if total.severity == status_mod.SEV_HARD
+    }
 
     try:
-        sections = _collect_sections(cfg)
+        sections = _collect_sections(cfg, snapshots)
     except (OSError, UnicodeDecodeError) as exc:
         _print_error(
             f"bootstrap input changed or became unreadable during audit: {exc}"
         )
         return 2
     candidates = shortlist(sections, cfg)
-    if hard_paths:
+    if hard_paths or hard_workspaces:
         reviewable_paths = {
             section.file
             for section in sections
@@ -372,20 +368,47 @@ def _run_audit_pipeline(
                 )
             return 2
 
+        reviewable_workspaces = {
+            section.file.parent
+            for section in sections
+            if section.file.parent in hard_workspaces
+            and section.heading_level in {2, 3}
+        }
+        unreviewable_workspaces = hard_workspaces - reviewable_workspaces
+        if unreviewable_workspaces:
+            for path in sorted(unreviewable_workspaces):
+                _print_error(
+                    f"cannot audit total-limit workspace {path}: no H2/H3 section "
+                    "is available for review"
+                )
+            return 2
+
         existing = {candidate.section: candidate for candidate in candidates}
         forced: list[Candidate] = []
         for section in sections:
             candidate = existing.get(section)
+            pressure_reasons: list[str] = []
+            if section.file in hard_paths:
+                pressure_reasons.append("hard-limit")
+            if section.file.parent in hard_workspaces:
+                pressure_reasons.append("total-limit")
             if candidate is not None:
-                if section.file in hard_paths and "hard-limit" not in candidate.reasons:
+                missing_reasons = tuple(
+                    reason
+                    for reason in pressure_reasons
+                    if reason not in candidate.reasons
+                )
+                if missing_reasons:
                     candidate = Candidate(
                         section=section,
-                        reasons=(*candidate.reasons, "hard-limit"),
+                        reasons=(*candidate.reasons, *missing_reasons),
                         duplicate_of=candidate.duplicate_of,
                     )
                 forced.append(candidate)
-            elif section.file in hard_paths and section.heading_level in {2, 3}:
-                forced.append(Candidate(section=section, reasons=("hard-limit",)))
+            elif pressure_reasons and section.heading_level in {2, 3}:
+                forced.append(
+                    Candidate(section=section, reasons=tuple(pressure_reasons))
+                )
         candidates = forced
     if not candidates:
         print("no candidates flagged; nothing to audit.")
@@ -399,7 +422,7 @@ def _run_audit_pipeline(
         if hasattr(args, "max_input_chars")
         else 200_000,
     )
-    return candidates, verdicts, stats, hard_paths
+    return candidates, verdicts, stats, hard_paths, hard_workspaces
 
 
 def run_audit(args: argparse.Namespace) -> int:
@@ -413,7 +436,7 @@ def run_audit(args: argparse.Namespace) -> int:
     result = _run_audit_pipeline(args, cfg)
     if isinstance(result, int):
         return result
-    candidates, verdicts, stats, hard_paths = result
+    candidates, verdicts, stats, hard_paths, hard_workspaces = result
 
     rows = list(zip(candidates, verdicts))
     if args.json:
@@ -423,7 +446,7 @@ def run_audit(args: argparse.Namespace) -> int:
 
     if stats.failures > 0:
         return 2
-    if hard_paths:
+    if hard_paths or hard_workspaces:
         return 2
     actionable = any(v.decision in ("move", "unsure") for v in verdicts)
     return 1 if actionable else 0
@@ -435,6 +458,7 @@ def run_audit(args: argparse.Namespace) -> int:
 
 
 def run_trim(args: argparse.Namespace) -> int:
+    from bootstrap_doctor import status as status_mod
     from bootstrap_doctor import trim as trim_mod
     from bootstrap_doctor.paths import ConfigError
     from bootstrap_doctor.safety import DirtyWorkspaceError, UnsafeTargetError
@@ -452,7 +476,7 @@ def run_trim(args: argparse.Namespace) -> int:
     result = _run_audit_pipeline(args, cfg)
     if isinstance(result, int):
         return result
-    _candidates, verdicts, stats, _hard_paths = result
+    _candidates, verdicts, stats, hard_paths, hard_workspaces = result
 
     # Never mutate based on a partial audit. --force exists to bypass
     # dirty-git, not to override gateway failures: if the operator
@@ -467,7 +491,7 @@ def run_trim(args: argparse.Namespace) -> int:
     move_verdicts = [v for v in verdicts if v.decision == "move"]
     if not move_verdicts:
         print("no actions to take.")
-        return 0
+        return 2 if hard_paths or hard_workspaces else 0
 
     actions = trim_mod.build_plan(
         move_verdicts, cfg, existing_card_collision=args.collision
@@ -478,12 +502,12 @@ def run_trim(args: argparse.Namespace) -> int:
         print(trim_mod.render_plan(actions, cfg))
         if not actions:
             print("no actions to take.")
-            return 0
-        return 0
+            return 2 if hard_paths or hard_workspaces else 0
+        return 2 if hard_paths or hard_workspaces else 0
 
     if not actions:
         print("no actions to take.")
-        return 0
+        return 2 if hard_paths or hard_workspaces else 0
 
     print(trim_mod.render_plan(actions, cfg))
 
@@ -507,10 +531,16 @@ def run_trim(args: argparse.Namespace) -> int:
             f"modified {len(summary.files_changed)} bootstrap files, "
             f"skipped {summary.skipped}"
         )
-        return 0
+        post_rows = status_mod.collect(cfg)
+        post_totals = status_mod.collect_totals(post_rows, cfg)
+        post_code = status_mod._exit_code(post_rows, post_totals)
+        if post_code == 2:
+            _print_error("hard bootstrap pressure remains after applied trim")
+            return 2
+        return post_code
 
     print("DRY RUN: re-run with --apply to persist these changes.")
-    return 1
+    return 2 if hard_paths or hard_workspaces else 1
 
 
 # ---------------------------------------------------------------------------
@@ -539,7 +569,7 @@ def main(argv: list[str] | None = None) -> int:
         _print_error("interrupted")
         return 130
     except UnsafeTargetError as exc:
-        _print_error(f"unsafe named workspace: {exc}")
+        _print_error(f"unsafe bootstrap path: {exc}")
         return 2
     except Exception as exc:
         if _trace_enabled():

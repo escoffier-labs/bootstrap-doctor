@@ -13,8 +13,8 @@ OpenClaw commit `6deded6698e16f3cd7e8c65f94d22660df248aa5`, authored on 2026-06-
 - Use standalone defaults that match current OpenClaw: 17,000 soft, 20,000 hard, and 60,000 total characters. The soft limit matches OpenClaw's 85 percent near-limit threshold.
 - Keep configuration overrides. Add `total_limit` to TOML, environment, CLI, status JSON, and validation.
 - Change the default tracked set to OpenClaw's recognized files: `AGENTS.md`, `SOUL.md`, `TOOLS.md`, `IDENTITY.md`, `USER.md`, `HEARTBEAT.md`, `BOOTSTRAP.md`, and optional `MEMORY.md`.
-- Treat missing `BOOTSTRAP.md` and `MEMORY.md` as optional. Other configured tracked files remain required.
-- Report total raw characters and total-budget status. Return 1 near or exactly at the total limit and 2 above it, matching OpenClaw's truncation boundary.
+- Treat missing `SOUL.md`, `IDENTITY.md`, `USER.md`, `HEARTBEAT.md`, `BOOTSTRAP.md`, and `MEMORY.md` as optional. `AGENTS.md`, `TOOLS.md`, and non-default configured files remain required.
+- Report total injected characters after each file's per-file cap and total-budget status. Return 1 near or exactly at the total limit and 2 above it, matching OpenClaw's truncation boundary.
 - Audit the same measured inputs as status. Missing or unreadable required files return 2. A hard-limit file forces all of its H2/H3 sections into the judge shortlist. A hard-limit file with no movable H2/H3 section returns 2 instead of a false clean result.
 - Keep the section-level judge and trim workflow. OpenClaw's native lint remains the authority for runtime-specific injection behavior in live operations.
 

@@ -10,7 +10,7 @@ from bootstrap_doctor import trim as trim_mod
 from bootstrap_doctor.judge import Verdict
 from bootstrap_doctor.parsing import Section, parse_file
 from bootstrap_doctor.paths import Config, resolve_config
-from bootstrap_doctor.safety import DirtyWorkspaceError
+from bootstrap_doctor.safety import DirtyWorkspaceError, UnsafeTargetError
 from bootstrap_doctor.trim import (
     CardWriteError,
     apply_plan,
@@ -556,6 +556,147 @@ def test_section_changed_since_plan_built(cfg: Config, workspace_dir: Path) -> N
     assert summary.skipped == 1
 
 
+def test_section_body_changed_since_judgment_is_not_replaced(
+    cfg: Config, workspace_dir: Path
+) -> None:
+    bs = write_bootstrap(
+        workspace_dir, "AGENTS.md", "## Old Setup\njudged body\n"
+    )
+    section = parse_file(bs)[0]
+    plan = build_plan([make_verdict(section)], cfg, today_iso=TODAY)
+
+    bs.write_text("## Old Setup\nnew concurrent handoff\n")
+    summary = apply_plan(plan, cfg, apply=True, force=True)
+
+    assert summary.actions_applied == 0
+    assert summary.skipped == 1
+    assert bs.read_text() == "## Old Setup\nnew concurrent handoff\n"
+    assert not (cfg.cards_dir / "old-setup-notes.md").exists()
+
+
+def test_apply_rejects_bootstrap_symlink_escape_after_judgment(
+    cfg: Config, workspace_dir: Path, tmp_path: Path
+) -> None:
+    body = "## Old Setup\njudged body\n"
+    bootstrap = write_bootstrap(workspace_dir, "AGENTS.md", body)
+    section = parse_file(bootstrap)[0]
+    plan = build_plan([make_verdict(section)], cfg, today_iso=TODAY)
+    outside = tmp_path / "outside.md"
+    outside.write_text(body)
+    bootstrap.unlink()
+    bootstrap.symlink_to(outside)
+
+    with pytest.raises(UnsafeTargetError):
+        render_plan(plan, cfg)
+    with pytest.raises(UnsafeTargetError):
+        apply_plan(plan, cfg, apply=True, force=True)
+
+    assert bootstrap.is_symlink()
+    assert outside.read_text() == body
+    assert not (cfg.cards_dir / "old-setup-notes.md").exists()
+
+
+def test_apply_aborts_if_source_changes_during_card_write(
+    cfg: Config,
+    workspace_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original = "## Old Setup\njudged body\n"
+    concurrent = "## Old Setup\nnew concurrent handoff\n"
+    bootstrap = write_bootstrap(workspace_dir, "AGENTS.md", original)
+    section = parse_file(bootstrap)[0]
+    plan = build_plan([make_verdict(section)], cfg, today_iso=TODAY)
+    real_atomic_write = trim_mod.atomic_write_text
+
+    def write_card_then_change_source(path: Path, content: str) -> None:
+        real_atomic_write(path, content)
+        if path.parent == cfg.cards_dir:
+            bootstrap.write_text(concurrent)
+
+    monkeypatch.setattr(trim_mod, "atomic_write_text", write_card_then_change_source)
+
+    with pytest.raises(CardWriteError) as exc:
+        apply_plan(plan, cfg, apply=True, force=True)
+
+    card = cfg.cards_dir / "old-setup-notes.md"
+    assert exc.value.cards_written == (card,)
+    assert card.exists()
+    assert bootstrap.read_text() == concurrent
+    assert "new concurrent handoff" in bootstrap.read_text()
+
+
+def test_apply_revalidates_each_source_immediately_before_write(
+    cfg: Config,
+    workspace_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    agents = write_bootstrap(
+        workspace_dir, "AGENTS.md", "## Agent Setup\nagent body\n"
+    )
+    tools = write_bootstrap(
+        workspace_dir, "TOOLS.md", "## Tool Setup\ntool body\n"
+    )
+    concurrent = "## Tool Setup\nnew concurrent tool handoff\n"
+    verdicts = [
+        make_verdict(parse_file(agents)[0], topic="Agent Setup Notes"),
+        make_verdict(parse_file(tools)[0], topic="Tool Setup Notes"),
+    ]
+    plan = build_plan(verdicts, cfg, today_iso=TODAY)
+    real_atomic_write = trim_mod.atomic_write_text
+
+    def write_agents_then_change_tools(path: Path, content: str) -> None:
+        real_atomic_write(path, content)
+        if path == agents:
+            tools.write_text(concurrent)
+
+    monkeypatch.setattr(trim_mod, "atomic_write_text", write_agents_then_change_tools)
+
+    with pytest.raises(CardWriteError) as exc:
+        apply_plan(plan, cfg, apply=True, force=True)
+
+    expected_cards = (
+        cfg.cards_dir / "agent-setup-notes.md",
+        cfg.cards_dir / "tool-setup-notes.md",
+    )
+    assert exc.value.cards_written == expected_cards
+    assert all(card.exists() for card in expected_cards)
+    assert tools.read_text() == concurrent
+
+
+def test_apply_wraps_source_symlink_swap_after_card_write(
+    cfg: Config,
+    workspace_dir: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original = "## Old Setup\njudged body\n"
+    bootstrap = write_bootstrap(workspace_dir, "AGENTS.md", original)
+    outside = tmp_path / "outside.md"
+    outside.write_text(original)
+    plan = build_plan(
+        [make_verdict(parse_file(bootstrap)[0])], cfg, today_iso=TODAY
+    )
+    real_atomic_write = trim_mod.atomic_write_text
+
+    def write_card_then_swap_source(path: Path, content: str) -> None:
+        real_atomic_write(path, content)
+        if path.parent == cfg.cards_dir:
+            bootstrap.unlink()
+            bootstrap.symlink_to(outside)
+
+    monkeypatch.setattr(trim_mod, "atomic_write_text", write_card_then_swap_source)
+
+    with pytest.raises(CardWriteError) as exc:
+        apply_plan(plan, cfg, apply=True, force=True)
+
+    card = cfg.cards_dir / "old-setup-notes.md"
+    assert exc.value.cards_written == (card,)
+    assert isinstance(exc.value.__cause__, UnsafeTargetError)
+    assert card.exists()
+    assert bootstrap.is_symlink()
+    assert outside.read_text() == original
+
+
 def test_multiple_verdicts_for_same_section_first_wins(
     cfg: Config, workspace_dir: Path
 ) -> None:
@@ -597,6 +738,26 @@ def test_render_plan_lists_new_cards_and_diffs(cfg: Config, workspace_dir: Path)
     assert "+- See [Old Setup Notes]" in out
     # Footer counts.
     assert "planned" in out.lower() or "actions" in out.lower()
+
+
+def test_render_plan_skips_same_heading_with_changed_body(
+    cfg: Config, workspace_dir: Path
+) -> None:
+    bootstrap = write_bootstrap(
+        workspace_dir, "AGENTS.md", "## Old Setup\njudged body\n"
+    )
+    plan = build_plan(
+        [make_verdict(parse_file(bootstrap)[0])], cfg, today_iso=TODAY
+    )
+    bootstrap.write_text("## Old Setup\nnew concurrent handoff\n")
+
+    out = render_plan(plan, cfg)
+
+    assert "NEW CARD" not in out
+    assert "+- See [Old Setup Notes]" not in out
+    assert "would write 0 card(s)" in out
+    assert "would modify 0 bootstrap file(s)" in out
+    assert "1 skipped" in out
 
 
 def test_render_plan_lists_skipped_actions(cfg: Config, workspace_dir: Path) -> None:

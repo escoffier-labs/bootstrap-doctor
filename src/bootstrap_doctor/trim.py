@@ -34,7 +34,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .judge import Verdict
-from .parsing import H2_RE, H3_RE, H4_PLUS_RE, Section, parse_file
+from .parsing import H2_RE, H3_RE, H4_PLUS_RE, Section, parse_text
 from .paths import Config
 from .safety import (
     UnsafeTargetError,
@@ -44,6 +44,7 @@ from .safety import (
     resolve_card_target,
     slugify,
 )
+from .status import FileSnapshot, read_file_snapshot, validate_snapshot
 
 
 def _is_h2_or_h3_heading(line: str) -> bool:
@@ -472,16 +473,17 @@ def _find_section_in_fresh_parse(
     """Locate the target section after re-parsing the bootstrap file.
 
     Match on ``heading_path + start_line``. If line numbers shifted but
-    the heading_path is unique, accept that. If nothing matches return
-    None and the caller skips the action.
+    the heading_path is unique, accept that only when its body is unchanged
+    from the judged section. If nothing matches return None and the caller
+    skips the action.
     """
     # Exact heading_path + start_line match.
     for s in fresh_sections:
         if s.heading_path == target.heading_path and s.start_line == target.start_line:
-            return s
+            return s if s.body == target.body else None
     # Fallback: unique heading_path match.
     matches = [s for s in fresh_sections if s.heading_path == target.heading_path]
-    if len(matches) == 1:
+    if len(matches) == 1 and matches[0].body == target.body:
         return matches[0]
     return None
 
@@ -598,20 +600,22 @@ def apply_plan(
     # of blindly clobbering. Each surviving action carries the final
     # (resolved_card_path, breadcrumb_line) chosen here.
     projected: dict[Path, str] = {}
+    source_snapshots: dict[Path, FileSnapshot] = {}
     survivors: list[tuple[TrimAction, Path, str]] = []
 
     for bootstrap_path, file_actions in by_file.items():
-        if not bootstrap_path.exists():
+        snapshot = read_file_snapshot(
+            cfg.workspace_dir,
+            bootstrap_path,
+            "workspace",
+            bootstrap_path.name,
+        )
+        if not snapshot.exists or snapshot.text is None:
             runtime_skipped += len(file_actions)
             continue
 
-        try:
-            current_text = bootstrap_path.read_text(encoding="utf-8")
-        except OSError:
-            runtime_skipped += len(file_actions)
-            continue
-
-        fresh_sections = parse_file(bootstrap_path)
+        current_text = snapshot.text
+        fresh_sections = parse_text(current_text, bootstrap_path)
 
         # Process in REVERSE start_line order so earlier edits don't
         # shift the line offsets of later edits in the same file.
@@ -658,7 +662,10 @@ def apply_plan(
 
         if file_survivors and new_text != current_text:
             projected[bootstrap_path] = new_text
+            source_snapshots[bootstrap_path] = snapshot
             survivors.extend(file_survivors)
+
+    _validate_projected_sources(cfg, source_snapshots, cards_written)
 
     # Phase 2: write every surviving card BEFORE any bootstrap is
     # touched. If any card write fails, no bootstrap rewrite runs.
@@ -697,6 +704,12 @@ def apply_plan(
 
     # Phase 3: every card is on disk; now rewrite the bootstraps.
     for bootstrap_path, new_text in projected.items():
+        _validate_projected_source(
+            cfg,
+            bootstrap_path,
+            source_snapshots[bootstrap_path],
+            cards_written,
+        )
         atomic_write_text(bootstrap_path, new_text)
         files_changed.append(bootstrap_path)
 
@@ -707,6 +720,37 @@ def apply_plan(
         files_changed=tuple(files_changed),
         cards_written=tuple(cards_written),
     )
+
+
+def _validate_projected_sources(
+    cfg: Config,
+    source_snapshots: dict[Path, FileSnapshot],
+    cards_written: list[Path],
+) -> None:
+    """Abort if any projected source changed since its phase-1 read."""
+    for bootstrap_path, snapshot in source_snapshots.items():
+        _validate_projected_source(
+            cfg, bootstrap_path, snapshot, cards_written
+        )
+
+
+def _validate_projected_source(
+    cfg: Config,
+    bootstrap_path: Path,
+    snapshot: FileSnapshot,
+    cards_written: list[Path],
+) -> None:
+    """Preserve card evidence when a projected source is no longer safe."""
+    try:
+        validate_snapshot(cfg, snapshot)
+    except (OSError, UnsafeTargetError) as exc:
+        raise CardWriteError(
+            f"bootstrap source changed before rewrite: {bootstrap_path} "
+            f"({len(cards_written)} card(s) written)",
+            failed_card=bootstrap_path,
+            cards_written=tuple(cards_written),
+            cause=exc,
+        ) from exc
 
 
 def _resolve_collision_at_apply(
@@ -782,36 +826,49 @@ def _rel_to_workspace(cfg: Config, path: Path) -> str:
 
 
 def _projected_file_text(
-    actions: list[TrimAction], bootstrap_path: Path
-) -> tuple[str, str]:
-    """Return ``(current_text, projected_text)`` for diff purposes.
+    actions: list[TrimAction], bootstrap_path: Path, cfg: Config
+) -> tuple[str, str, tuple[TrimAction, ...]]:
+    """Return current text, projected text, and freshly matched actions.
 
     Skipped actions don't contribute. Order of application matches
     :func:`apply_plan` (reverse start_line).
     """
-    try:
-        current = bootstrap_path.read_text(encoding="utf-8")
-    except OSError:
-        return "", ""
+    snapshot = read_file_snapshot(
+        cfg.workspace_dir,
+        bootstrap_path,
+        "workspace",
+        bootstrap_path.name,
+    )
+    if not snapshot.exists or snapshot.text is None:
+        return "", "", ()
+    current = snapshot.text
     live = [
         a
         for a in actions
         if not a.skipped and a.bootstrap_path == bootstrap_path
     ]
     if not live:
-        return current, current
+        return current, current, ()
+    fresh_sections = parse_text(current, bootstrap_path)
     text = current
+    matched: list[TrimAction] = []
     ordered = sorted(
         live, key=lambda a: a.original_section.start_line, reverse=True
     )
     for action in ordered:
+        fresh = _find_section_in_fresh_parse(
+            fresh_sections, action.original_section
+        )
+        if fresh is None:
+            continue
         rebuilt = _replace_section_body(
-            text, action.original_section, action.breadcrumb_line
+            text, fresh, action.breadcrumb_line
         )
         if rebuilt is None:
             continue
         text = rebuilt
-    return current, text
+        matched.append(action)
+    return current, text, tuple(matched)
 
 
 def render_plan(actions: list[TrimAction], cfg: Config) -> str:
@@ -825,8 +882,25 @@ def render_plan(actions: list[TrimAction], cfg: Config) -> str:
          modify N bootstrap files, M skipped.
     """
     out: list[str] = []
-    live = [a for a in actions if not a.skipped]
+    candidate_live = [a for a in actions if not a.skipped]
     skipped = [a for a in actions if a.skipped]
+
+    affected: list[Path] = []
+    for action in candidate_live:
+        if action.bootstrap_path not in affected:
+            affected.append(action.bootstrap_path)
+    projections: dict[Path, tuple[str, str]] = {}
+    matched_ids: set[int] = set()
+    for bootstrap_path in affected:
+        current, projected, matched = _projected_file_text(
+            actions, bootstrap_path, cfg
+        )
+        projections[bootstrap_path] = (current, projected)
+        matched_ids.update(id(action) for action in matched)
+    live = [action for action in candidate_live if id(action) in matched_ids]
+    runtime_skipped = [
+        action for action in candidate_live if id(action) not in matched_ids
+    ]
 
     # NEW CARD blocks (one per live action).
     for action in live:
@@ -845,14 +919,12 @@ def render_plan(actions: list[TrimAction], cfg: Config) -> str:
         out.append("")
 
     # Unified diff per affected bootstrap file.
-    affected: list[Path] = []
-    for action in live:
-        if action.bootstrap_path not in affected:
-            affected.append(action.bootstrap_path)
+    modified: list[Path] = []
     for bootstrap_path in affected:
-        current, projected = _projected_file_text(actions, bootstrap_path)
+        current, projected = projections[bootstrap_path]
         if current == projected:
             continue
+        modified.append(bootstrap_path)
         rel = _rel_to_workspace(cfg, bootstrap_path)
         diff = difflib.unified_diff(
             current.splitlines(keepends=True),
@@ -867,18 +939,21 @@ def render_plan(actions: list[TrimAction], cfg: Config) -> str:
             out.append("")
 
     # Skipped block.
-    if skipped:
+    if skipped or runtime_skipped:
         out.append("SKIPPED:")
         for action in skipped:
             topic = action.verdict.topic or action.original_section.heading_text
             out.append(f"  - {topic}: {action.skip_reason}")
+        for action in runtime_skipped:
+            topic = action.verdict.topic or action.original_section.heading_text
+            out.append(f"  - {topic}: source section changed since plan was built")
         out.append("")
 
     # Footer.
     n_planned = len(actions)
     n_cards = len(live)
-    n_files = len(affected)
-    n_skipped = len(skipped)
+    n_files = len(modified)
+    n_skipped = len(skipped) + len(runtime_skipped)
     out.append(
         f"Summary: {n_planned} actions planned, would write {n_cards} card(s), "
         f"would modify {n_files} bootstrap file(s), {n_skipped} skipped."

@@ -353,6 +353,50 @@ def test_audit_forces_hard_file_sections_into_shortlist(
     assert "hard-limit" in seen[0].reasons
 
 
+def test_audit_forces_total_limit_sections_and_returns_two(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace, cards = _mk_workspace(tmp_path)
+    (workspace / "AGENTS.md").write_text("## Active\n\n" + "x" * 120)
+    (workspace / "TOOLS.md").write_text("## Commands\n\n" + "y" * 120)
+    cfg_path = _write_config(
+        tmp_path,
+        workspace=workspace,
+        cards=cards,
+        soft=150,
+        hard=200,
+        total=200,
+        tracked=("AGENTS.md", "TOOLS.md"),
+    )
+    from bootstrap_doctor import judge as judge_mod
+
+    seen: list = []
+
+    def fake_judge_all(candidates: list, cfg: Config, **kwargs: Any):
+        seen.extend(candidates)
+        return [
+            Verdict(
+                section=c.section,
+                decision="keep",
+                topic="",
+                category="",
+                tags=(),
+                hook="",
+                reasoning="active",
+                source="gateway",
+                body_sha="x" * 64,
+            )
+            for c in candidates
+        ], JudgeStats(requests_made=len(candidates))
+
+    monkeypatch.setattr(judge_mod, "judge_all", fake_judge_all)
+    code = cli_mod.main(["audit", "--config", str(cfg_path)])
+    assert code == 2
+    assert len(seen) == 2
+    assert all("total-limit" in candidate.reasons for candidate in seen)
+
+
 def test_audit_fails_closed_when_parse_breaks_after_preflight(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -363,14 +407,61 @@ def test_audit_fails_closed_when_parse_breaks_after_preflight(
     cfg_path = _write_config(tmp_path, workspace=workspace, cards=cards)
     from bootstrap_doctor import parsing as parsing_mod
 
-    def fail_parse(path: Path):
+    def fail_parse(text: str, path: Path):
         raise OSError("file changed during audit")
 
-    monkeypatch.setattr(parsing_mod, "parse_file", fail_parse)
+    monkeypatch.setattr(parsing_mod, "parse_text", fail_parse)
     code = cli_mod.main(["audit", "--config", str(cfg_path)])
     captured = capsys.readouterr()
     assert code == 2
     assert "changed during audit" in captured.err.lower()
+
+
+def test_audit_rejects_content_change_during_snapshot_parse(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    workspace, cards = _mk_workspace(tmp_path)
+    required = workspace / "AGENTS.md"
+    required.write_text("## Original\n\n" + "x" * 500)
+    cfg_path = _write_config(
+        tmp_path, workspace=workspace, cards=cards, hard=1000
+    )
+    from bootstrap_doctor import parsing as parsing_mod
+
+    original_parse_text = parsing_mod.parse_text
+
+    def parse_then_replace(text: str, path: Path):
+        sections = original_parse_text(text, path)
+        path.write_text("## Replacement\n\n" + "y" * 500)
+        return sections
+
+    monkeypatch.setattr(parsing_mod, "parse_text", parse_then_replace)
+    code = cli_mod.main(["audit", "--config", str(cfg_path)])
+    captured = capsys.readouterr()
+    assert code == 2
+    assert "changed" in captured.err.lower()
+
+
+@pytest.mark.parametrize("verb", ["status", "audit", "trim"])
+def test_reading_verbs_reject_tracked_file_symlink_escape(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    verb: str,
+) -> None:
+    workspace, cards = _mk_workspace(tmp_path)
+    outside = tmp_path / "outside.md"
+    outside.write_text("## Secret\n\n" + "x" * 500)
+    (workspace / "AGENTS.md").symlink_to(outside)
+    cfg_path = _write_config(tmp_path, workspace=workspace, cards=cards)
+    from bootstrap_doctor import judge as judge_mod
+
+    def fail_if_called(*args: Any, **kwargs: Any):
+        pytest.fail("escaped tracked content reached the judge")
+
+    monkeypatch.setattr(judge_mod, "judge_all", fail_if_called)
+    assert cli_mod.main([verb, "--config", str(cfg_path)]) == 2
 
 
 def test_audit_fails_closed_when_required_file_disappears_after_preflight(
@@ -384,18 +475,17 @@ def test_audit_fails_closed_when_required_file_disappears_after_preflight(
     cfg_path = _write_config(tmp_path, workspace=workspace, cards=cards)
     from bootstrap_doctor import status as status_mod
 
-    original_collect = status_mod.collect
+    original_validate = status_mod.validate_snapshot
 
-    def collect_then_remove(cfg: Config):
-        rows = original_collect(cfg)
+    def remove_then_validate(cfg: Config, snapshot):
         required.unlink()
-        return rows
+        return original_validate(cfg, snapshot)
 
-    monkeypatch.setattr(status_mod, "collect", collect_then_remove)
+    monkeypatch.setattr(status_mod, "validate_snapshot", remove_then_validate)
     code = cli_mod.main(["audit", "--config", str(cfg_path)])
     captured = capsys.readouterr()
     assert code == 2
-    assert "required bootstrap file disappeared" in captured.err.lower()
+    assert "bootstrap file disappeared" in captured.err.lower()
 
 
 def test_audit_hard_preamble_only_file_returns_two(
@@ -547,7 +637,14 @@ def test_trim_dry_run_returns_one(
     bootstrap = workspace / "AGENTS.md"
     bootstrap.write_text(body)
     _git_init(workspace)
-    cfg_path = _write_config(tmp_path, workspace=workspace, cards=cards)
+    cfg_path = _write_config(
+        tmp_path,
+        workspace=workspace,
+        cards=cards,
+        soft=100,
+        hard=1000,
+        total=2000,
+    )
 
     from bootstrap_doctor import judge as judge_mod
 
@@ -896,7 +993,9 @@ def test_trim_no_actions_returns_zero(
     workspace, cards = _mk_workspace(tmp_path)
     body = "## Section A\n\n" + ("x" * 500) + "\n"
     (workspace / "AGENTS.md").write_text(body)
-    cfg_path = _write_config(tmp_path, workspace=workspace, cards=cards)
+    cfg_path = _write_config(
+        tmp_path, workspace=workspace, cards=cards, hard=1000
+    )
 
     from bootstrap_doctor import judge as judge_mod
 
@@ -926,6 +1025,162 @@ def test_trim_no_actions_returns_zero(
     captured = capsys.readouterr()
     assert code == 0
     assert "no actions" in captured.out.lower()
+
+
+def test_trim_hard_file_all_keep_returns_two(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace, cards = _mk_workspace(tmp_path)
+    (workspace / "AGENTS.md").write_text("## Active\n\n" + "x" * 250)
+    cfg_path = _write_config(
+        tmp_path, workspace=workspace, cards=cards, soft=100, hard=200
+    )
+    from bootstrap_doctor import judge as judge_mod
+
+    def fake_judge_all(candidates: list, cfg: Config, **kwargs: Any):
+        return [
+            Verdict(
+                section=c.section,
+                decision="keep",
+                topic="",
+                category="",
+                tags=(),
+                hook="",
+                reasoning="active",
+                source="gateway",
+                body_sha="x" * 64,
+            )
+            for c in candidates
+        ], JudgeStats(requests_made=len(candidates))
+
+    monkeypatch.setattr(judge_mod, "judge_all", fake_judge_all)
+    assert cli_mod.main(["trim", "--config", str(cfg_path)]) == 2
+
+
+def test_trim_apply_remeasures_remaining_hard_pressure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace, cards = _mk_workspace(tmp_path)
+    bootstrap = workspace / "AGENTS.md"
+    bootstrap.write_text(
+        "## Move\n\n" + "x" * 750 + "\n\n## Keep\n\n" + "y" * 750 + "\n"
+    )
+    _git_init(workspace)
+    cfg_path = _write_config(
+        tmp_path,
+        workspace=workspace,
+        cards=cards,
+        soft=500,
+        hard=700,
+        total=2_000,
+    )
+    from bootstrap_doctor import judge as judge_mod
+
+    def fake_judge_all(candidates: list, cfg: Config, **kwargs: Any):
+        verdicts = []
+        for candidate in candidates:
+            move = candidate.section.heading_text == "Move"
+            verdicts.append(
+                Verdict(
+                    section=candidate.section,
+                    decision="move" if move else "keep",
+                    topic="moved" if move else "",
+                    category="session-log" if move else "",
+                    tags=(),
+                    hook="moved" if move else "",
+                    reasoning="historical" if move else "active",
+                    source="gateway",
+                    body_sha="x" * 64,
+                )
+            )
+        return verdicts, JudgeStats(requests_made=len(verdicts))
+
+    monkeypatch.setattr(judge_mod, "judge_all", fake_judge_all)
+    code = cli_mod.main(
+        ["trim", "--config", str(cfg_path), "--apply", "--force"]
+    )
+    assert code == 2
+
+
+def test_trim_hard_move_dry_run_returns_two(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace, cards = _mk_workspace(tmp_path)
+    (workspace / "AGENTS.md").write_text("## Move\n\n" + "x" * 250 + "\n")
+    cfg_path = _write_config(
+        tmp_path, workspace=workspace, cards=cards, soft=100, hard=200
+    )
+    from bootstrap_doctor import judge as judge_mod
+
+    def fake_judge_all(candidates: list, cfg: Config, **kwargs: Any):
+        return [
+            Verdict(
+                section=c.section,
+                decision="move",
+                topic="moved",
+                category="session-log",
+                tags=(),
+                hook="moved",
+                reasoning="historical",
+                source="gateway",
+                body_sha="x" * 64,
+            )
+            for c in candidates
+        ], JudgeStats(requests_made=len(candidates))
+
+    monkeypatch.setattr(judge_mod, "judge_all", fake_judge_all)
+
+    assert cli_mod.main(["trim", "--config", str(cfg_path)]) == 2
+
+
+def test_trim_apply_propagates_remaining_soft_pressure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace, cards = _mk_workspace(tmp_path)
+    bootstrap = workspace / "AGENTS.md"
+    bootstrap.write_text(
+        "## Move\n\n" + "x" * 750 + "\n\n## Keep\n\n" + "y" * 750 + "\n"
+    )
+    _git_init(workspace)
+    cfg_path = _write_config(
+        tmp_path,
+        workspace=workspace,
+        cards=cards,
+        soft=500,
+        hard=2000,
+        total=3000,
+    )
+    from bootstrap_doctor import judge as judge_mod
+
+    def fake_judge_all(candidates: list, cfg: Config, **kwargs: Any):
+        verdicts = []
+        for candidate in candidates:
+            move = candidate.section.heading_text == "Move"
+            verdicts.append(
+                Verdict(
+                    section=candidate.section,
+                    decision="move" if move else "keep",
+                    topic="moved" if move else "",
+                    category="session-log" if move else "",
+                    tags=(),
+                    hook="moved" if move else "",
+                    reasoning="historical" if move else "active",
+                    source="gateway",
+                    body_sha="x" * 64,
+                )
+            )
+        return verdicts, JudgeStats(requests_made=len(verdicts))
+
+    monkeypatch.setattr(judge_mod, "judge_all", fake_judge_all)
+
+    code = cli_mod.main(
+        ["trim", "--config", str(cfg_path), "--apply", "--force"]
+    )
+    assert code == 1
 
 
 # ---------------------------------------------------------------------------

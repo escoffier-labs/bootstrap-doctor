@@ -22,7 +22,7 @@ A Python CLI (pipx-installable, mirrors memory-doctor's project layout and comma
 
 ### Tracked files (default, overridable via config)
 
-`AGENTS.md`, `SOUL.md`, `TOOLS.md`, `IDENTITY.md`, `USER.md`, `HEARTBEAT.md`, `BOOTSTRAP.md`, and `MEMORY.md`. `BOOTSTRAP.md` and `MEMORY.md` are optional when absent. `SAFETY_RULES.md` and `DREAMS.md` are not recognized OpenClaw bootstrap files. Each configured named workspace is scanned as its own scope.
+`AGENTS.md`, `SOUL.md`, `TOOLS.md`, `IDENTITY.md`, `USER.md`, `HEARTBEAT.md`, `BOOTSTRAP.md`, and `MEMORY.md`. `SOUL.md`, `IDENTITY.md`, `USER.md`, `HEARTBEAT.md`, `BOOTSTRAP.md`, and `MEMORY.md` are optional when absent. `SAFETY_RULES.md` and `DREAMS.md` are not recognized OpenClaw bootstrap files. Each configured named workspace is scanned as its own scope.
 
 ### Thresholds
 
@@ -30,7 +30,7 @@ A Python CLI (pipx-installable, mirrors memory-doctor's project layout and comma
 - `hard_limit` = 20,000 chars - force every reviewable H2/H3 section into `audit`
 - `total_limit` = 60,000 chars - report aggregate workspace pressure
 
-All three are configurable, and the per-file and total hard limits are independent. Total soft pressure begins at 85 percent of `total_limit`. Counts use the representation OpenClaw injects: ECMAScript trailing whitespace removed, measured as JavaScript UTF-16 code units. Content exactly at a hard boundary is retained and remains a soft warning; hard classification begins above the boundary.
+All three are configurable, and the per-file and total hard limits are independent. Total soft pressure begins at 85 percent of `total_limit`. Counts use the representation OpenClaw injects: ECMAScript trailing whitespace removed, measured as JavaScript UTF-16 code units. For standard sessions, aggregate pressure also includes OpenClaw's UTF-16 `[MISSING] Expected at: <absolute path>` marker for absent recognized defaults other than `MEMORY.md`. Content exactly at a hard boundary is retained and remains a soft warning; hard classification begins above the boundary.
 
 ### Decision pipeline
 

@@ -90,7 +90,7 @@ def test_trim_apply_copied_workspace_idempotency_and_dirty_block(
         ["trim", "--config", str(cfg_path), "--apply", "--collision", "overwrite"]
     )
     captured = capsys.readouterr()
-    assert code == 0, captured.err
+    assert code == 1, captured.err
 
     card = cards / "historical-setup-detail.md"
     assert card.exists()

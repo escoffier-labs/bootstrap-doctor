@@ -13,6 +13,7 @@ from bootstrap_doctor.paths import (
     DEFAULT_HARD_LIMIT,
     DEFAULT_MIN_SECTION_CHARS,
     DEFAULT_NAMED_WORKSPACES,
+    DEFAULT_OPTIONAL_TRACKED_FILES,
     DEFAULT_SOFT_LIMIT,
     DEFAULT_STALE_DAYS,
     DEFAULT_TOTAL_LIMIT,
@@ -73,11 +74,37 @@ def test_default_constants_match_spec():
     assert DEFAULT_MIN_SECTION_CHARS == 400
     assert DEFAULT_STALE_DAYS == 60
     assert DEFAULT_CACHE_DIR == "~/.cache/bootstrap-doctor"
-    assert "AGENTS.md" in DEFAULT_TRACKED_FILES
-    assert "MEMORY.md" in DEFAULT_TRACKED_FILES
-    assert "BOOTSTRAP.md" in DEFAULT_TRACKED_FILES
-    assert "SAFETY_RULES.md" not in DEFAULT_TRACKED_FILES
+    assert DEFAULT_TRACKED_FILES == [
+        "AGENTS.md",
+        "SOUL.md",
+        "TOOLS.md",
+        "IDENTITY.md",
+        "USER.md",
+        "HEARTBEAT.md",
+        "BOOTSTRAP.md",
+        "MEMORY.md",
+    ]
     assert DEFAULT_NAMED_WORKSPACES == []
+    assert DEFAULT_OPTIONAL_TRACKED_FILES == frozenset(
+        {
+            "SOUL.md",
+            "IDENTITY.md",
+            "USER.md",
+            "HEARTBEAT.md",
+            "BOOTSTRAP.md",
+            "MEMORY.md",
+        }
+    )
+
+
+def test_schema_example_lists_every_default_tracked_file() -> None:
+    from bootstrap_doctor import paths as paths_mod
+
+    assert paths_mod.__doc__ is not None
+    expected = "tracked_files = [" + ", ".join(
+        f'"{name}"' for name in DEFAULT_TRACKED_FILES
+    ) + "]"
+    assert expected in paths_mod.__doc__
 
 
 def test_defaults_applied_when_no_config_no_env_no_flags(

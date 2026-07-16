@@ -9,7 +9,7 @@
 
 ### Changed
 - Updated standalone defaults to OpenClaw's current 17,000 soft and 20,000 hard per-file limits. OpenClaw raised the hard default in commit `6deded6698e16f3cd7e8c65f94d22660df248aa5` on 2026-06-01.
-- Aligned default discovery with OpenClaw's loader: added `BOOTSTRAP.md`, made `BOOTSTRAP.md` and `MEMORY.md` optional when absent, and removed unrecognized `SAFETY_RULES.md`.
+- Aligned default discovery with OpenClaw's loader: added `BOOTSTRAP.md`, made `SOUL.md`, `IDENTITY.md`, `USER.md`, `HEARTBEAT.md`, `BOOTSTRAP.md`, and `MEMORY.md` optional when absent, and removed unrecognized `SAFETY_RULES.md`.
 - Character counts now match OpenClaw's trimmed JavaScript UTF-16 representation.
 - Hard-limit files force their H2/H3 sections into audit; a hard file without reviewable sections fails instead of reporting no candidates.
 - Bootstrap budgets are stable standalone defaults and no longer change when Brigade is installed.
