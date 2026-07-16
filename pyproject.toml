@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "bootstrap-doctor"
-version = "0.2.0"
-description = "Audit and trim OpenClaw bootstrap files that brush the ~12k char ceiling."
+version = "0.3.0"
+description = "Audit and trim OpenClaw bootstrap files against current injection budgets."
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11"
@@ -31,10 +31,6 @@ Repository = "https://github.com/escoffier-labs/bootstrap-doctor"
 bootstrap-doctor = "bootstrap_doctor.cli:main"
 
 [project.optional-dependencies]
-# brigade.budgets owns the canonical size thresholds. bootstrap-doctor ships a
-# mirrored fallback so it runs standalone; install this extra to source the
-# limits from brigade directly and stay in lockstep with the rest of the
-# escoffier-labs tooling.
 brigade = [
   "brigade-cli>=0.8.0",
 ]

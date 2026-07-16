@@ -14,13 +14,13 @@ OpenClaw commit `6deded6698e16f3cd7e8c65f94d22660df248aa5`, authored on 2026-06-
 - Keep configuration overrides. Add `total_limit` to TOML, environment, CLI, status JSON, and validation.
 - Change the default tracked set to OpenClaw's recognized files: `AGENTS.md`, `SOUL.md`, `TOOLS.md`, `IDENTITY.md`, `USER.md`, `HEARTBEAT.md`, `BOOTSTRAP.md`, and optional `MEMORY.md`.
 - Treat missing `BOOTSTRAP.md` and `MEMORY.md` as optional. Other configured tracked files remain required.
-- Report total raw characters and total-budget status. Return 1 near the total limit and 2 at or above it.
+- Report total raw characters and total-budget status. Return 1 near or exactly at the total limit and 2 above it, matching OpenClaw's truncation boundary.
 - Audit the same measured inputs as status. Missing or unreadable required files return 2. A hard-limit file forces all of its H2/H3 sections into the judge shortlist. A hard-limit file with no movable H2/H3 section returns 2 instead of a false clean result.
 - Keep the section-level judge and trim workflow. OpenClaw's native lint remains the authority for runtime-specific injection behavior in live operations.
 
 ## Failure handling
 
-Invalid limit relationships fail configuration before file reads. Audit never converts skipped input into exit 0. Total-budget pressure is report-only because section moves remain per-file operations.
+Invalid non-positive limits and per-file soft limits at or above the hard limit fail configuration before file reads. Per-file and total hard limits are otherwise independent, matching OpenClaw. Audit never converts skipped input into exit 0. Total-budget pressure is report-only because section moves remain per-file operations.
 
 ## Verification
 

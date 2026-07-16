@@ -31,7 +31,7 @@
 pipx install git+https://github.com/escoffier-labs/bootstrap-doctor
 bootstrap-doctor status
 bootstrap-doctor audit
-bootstrap-doctor trim --dry-run
+bootstrap-doctor trim
 ```
 
 ## What it does
@@ -49,33 +49,31 @@ bootstrap-doctor trim --dry-run
 
 ```
 $ bootstrap-doctor status
-workspace: /home/you/.openclaw/workspace
-  AGENTS.md         11,805 chars   185 lines   OVER soft (10,000)
-  TOOLS.md          11,589 chars   221 lines   OVER soft (10,000)
-  SOUL.md            8,373 chars   124 lines   ok
-  SAFETY_RULES.md    7,658 chars   118 lines   ok
-  USER.md            7,229 chars    96 lines   ok
-  IDENTITY.md        3,402 chars    52 lines   ok
-  HEARTBEAT.md       2,109 chars    34 lines   ok
-  MEMORY.md         15,720 chars   192 lines   OVER hard (11,500)
+bootstrap-doctor status  (soft=17000, hard=20000, total=60000)
+
+workspace  /home/you/.openclaw/workspace
+  file          chars  lines    soft    hard  sev
+  AGENTS.md     14643    185   +2357   +5357  ok
+  TOOLS.md      11409    221   +5591   +8591  ok
+  BOOTSTRAP.md      -      -       -       -  OPTIONAL
+  total: 49307/60000 (+10693 remaining, ok, complete)
 ```
 
-Use `--json` for machine-readable output with `soft_limit`, `hard_limit`, and one row per tracked file.
+Use `--json` for machine-readable output with per-file limits, the 60,000-character workspace limit, per-workspace totals, and one row per tracked file. Character counts use OpenClaw's injected representation: trailing whitespace is removed and JavaScript UTF-16 code units are counted.
 
 ### audit
 
 ```
 $ bootstrap-doctor audit
-TOOLS.md
-  ## Postiz API endpoints          [move]  -> postiz-api-endpoints.md
-  ## Eero device culling            [keep]
-  ## Jellyfin tool patterns         [move]  -> jellyfin-tool-patterns.md
-AGENTS.md
-  ## codex-builder agent gotchas    [unsure]
-  ## ACPX-routed agent pinning      [move]  -> acpx-routed-agent-pinning.md
+workspace   file            heading                       chars  reasons                 decision  topic / reasoning
+workspace   TOOLS.md        Postiz API endpoints            412  large                   move      Postiz API endpoints
+workspace   TOOLS.md        Eero device culling             186  stale                   keep      active operating rule
+workspace   AGENTS.md       codex-builder agent gotchas     533  large, stale            unsure    needs operator review
+
+stats: gateway_requests=3  cache_hits=0  failures=0
 ```
 
-No writes. Verdicts cached by content hash so re-runs are cheap; pass `--no-cache` to force re-judgement.
+No writes. Verdicts cached by content hash so re-runs are cheap; pass `--no-cache` to bypass the cache for that run.
 
 ### trim
 
@@ -120,11 +118,12 @@ workspace_dir = "~/.openclaw/workspace"
 cards_dir = "~/.openclaw/workspace/memory/cards"
 gateway_url = "http://localhost:11434"
 gateway_model = "deepseek-v4-pro:cloud"
-soft_limit = 10000
-hard_limit = 11500
+soft_limit = 17000
+hard_limit = 20000
+total_limit = 60000
 tracked_files = [
-  "AGENTS.md", "TOOLS.md", "SOUL.md", "USER.md",
-  "SAFETY_RULES.md", "IDENTITY.md", "HEARTBEAT.md", "MEMORY.md",
+  "AGENTS.md", "SOUL.md", "TOOLS.md", "IDENTITY.md",
+  "USER.md", "HEARTBEAT.md", "BOOTSTRAP.md", "MEMORY.md",
 ]
 named_workspaces = ["workspace-claude", "workspace-main", "workspace-researcher"]
 
@@ -135,7 +134,7 @@ stale_days = 60
 
 Layering: built-in defaults, then config file, then env vars, then CLI flags.
 
-Path-like values must be non-empty strings without control characters or leading/trailing whitespace. `tracked_files` and `named_workspaces` must be local names, not paths.
+Path-like values must be non-empty strings without control characters or leading/trailing whitespace. `tracked_files` and `named_workspaces` must be unique local names, not paths. Missing `BOOTSTRAP.md` and `MEMORY.md` are optional because OpenClaw may omit them after setup or when long-term memory is disabled. Other configured files are required.
 
 ## Safety
 
@@ -143,7 +142,7 @@ Path-like values must be non-empty strings without control characters or leading
 - Atomic writes: temp file plus rename, so a torn write cannot leave a half-rewritten bootstrap file.
 - Path-traversal guard on card slugs (must resolve inside `cards_dir`).
 - Refuses to run if `git status` in the workspace is dirty, so any change is revertable. If `cards_dir` lives in a separate git repo, that repo must be clean too. Override with `--force`.
-- Verdict cache is local-only (`~/.cache/bootstrap-doctor/verdicts.json`). Clear with `--no-cache`.
+- Verdict cache is local-only (`~/.cache/bootstrap-doctor/verdicts.json`). Bypass it for one run with `--no-cache`.
 - Card-write failures abort before bootstrap files are rewritten, so a failed run cannot leave breadcrumbs pointing at missing cards.
 
 ## Why not something else?
@@ -155,7 +154,7 @@ Path-like values must be non-empty strings without control characters or leading
 
 ## What bootstrap-doctor is not
 
-bootstrap-doctor is not a memory manager, a context-compression engine, or an OpenClaw replacement. It does one thing: keep bootstrap files under the prefix budget by relocating reference detail into cards.
+bootstrap-doctor is not a memory manager, a context-compression engine, or an OpenClaw replacement. It checks OpenClaw's default 20,000-character per-file and 60,000-character total budgets, then helps relocate reference detail into cards. OpenClaw's native doctor remains authoritative for generated hook content and runtime-specific injection.
 
 It does not:
 

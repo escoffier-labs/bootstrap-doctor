@@ -40,6 +40,7 @@ def _write_config(
     cards: Path,
     soft: int = 100,
     hard: int = 200,
+    total: int = 600,
     tracked: tuple[str, ...] = ("AGENTS.md",),
 ) -> Path:
     """Write a config.toml for end-to-end CLI runs."""
@@ -52,6 +53,7 @@ workspace_dir = "{workspace}"
 cards_dir = "{cards}"
 soft_limit = {soft}
 hard_limit = {hard}
+total_limit = {total}
 tracked_files = [{tracked_list}]
 named_workspaces = []
 
@@ -173,6 +175,8 @@ def test_common_flags_propagate(tmp_path: Path) -> None:
             "1000",
             "--hard-limit",
             "1100",
+            "--total-limit",
+            "3300",
         ]
     )
     assert args.workspace_dir == str(tmp_path)
@@ -180,6 +184,7 @@ def test_common_flags_propagate(tmp_path: Path) -> None:
     assert args.gateway_model == "m"
     assert args.soft_limit == 1000
     assert args.hard_limit == 1100
+    assert args.total_limit == 3300
 
 
 # ---------------------------------------------------------------------------
@@ -221,7 +226,9 @@ def test_audit_dispatches_through_judge(
     workspace, cards = _mk_workspace(tmp_path)
     body = "# Preamble\n\n## Big Section\n\n" + ("a" * 500) + "\n"
     (workspace / "AGENTS.md").write_text(body)
-    cfg_path = _write_config(tmp_path, workspace=workspace, cards=cards)
+    cfg_path = _write_config(
+        tmp_path, workspace=workspace, cards=cards, hard=1000
+    )
 
     from bootstrap_doctor import judge as judge_mod
 
@@ -270,6 +277,117 @@ def test_audit_no_candidates_returns_zero(
     assert "no candidates" in captured.out.lower()
 
 
+def test_audit_missing_required_file_returns_two(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    workspace, cards = _mk_workspace(tmp_path)
+    cfg_path = _write_config(tmp_path, workspace=workspace, cards=cards)
+    code = cli_mod.main(["audit", "--config", str(cfg_path)])
+    captured = capsys.readouterr()
+    assert code == 2
+    assert "AGENTS.md" in captured.err
+    assert "missing" in captured.err.lower()
+
+
+def test_audit_unreadable_required_file_returns_two(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    workspace, cards = _mk_workspace(tmp_path)
+    (workspace / "AGENTS.md").write_bytes(b"\xff\xfe")
+    cfg_path = _write_config(tmp_path, workspace=workspace, cards=cards)
+    code = cli_mod.main(["audit", "--config", str(cfg_path)])
+    captured = capsys.readouterr()
+    assert code == 2
+    assert "AGENTS.md" in captured.err
+    assert "unreadable" in captured.err.lower()
+
+
+def test_audit_missing_optional_file_returns_zero(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    workspace, cards = _mk_workspace(tmp_path)
+    cfg_path = _write_config(
+        tmp_path, workspace=workspace, cards=cards, tracked=("BOOTSTRAP.md",)
+    )
+    code = cli_mod.main(["audit", "--config", str(cfg_path)])
+    captured = capsys.readouterr()
+    assert code == 0
+    assert "no candidates" in captured.out.lower()
+
+
+def test_audit_forces_hard_file_sections_into_shortlist(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace, cards = _mk_workspace(tmp_path)
+    (workspace / "AGENTS.md").write_text("## Keep\n\n" + "x" * 205)
+    cfg_path = _write_config(
+        tmp_path, workspace=workspace, cards=cards, soft=100, hard=200
+    )
+    from bootstrap_doctor import judge as judge_mod
+
+    seen: list = []
+
+    def fake_judge_all(candidates: list, cfg: Config, **kwargs: Any):
+        seen.extend(candidates)
+        verdicts = [
+            Verdict(
+                section=c.section,
+                decision="keep",
+                topic="",
+                category="",
+                tags=(),
+                hook="",
+                reasoning="active rule",
+                source="gateway",
+                body_sha="x" * 64,
+            )
+            for c in candidates
+        ]
+        return verdicts, JudgeStats(requests_made=len(verdicts))
+
+    monkeypatch.setattr(judge_mod, "judge_all", fake_judge_all)
+    code = cli_mod.main(["audit", "--config", str(cfg_path)])
+    assert code == 2
+    assert len(seen) == 1
+    assert "hard-limit" in seen[0].reasons
+
+
+def test_audit_fails_closed_when_parse_breaks_after_preflight(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    workspace, cards = _mk_workspace(tmp_path)
+    (workspace / "AGENTS.md").write_text("## Present\nbody\n")
+    cfg_path = _write_config(tmp_path, workspace=workspace, cards=cards)
+    from bootstrap_doctor import parsing as parsing_mod
+
+    def fail_parse(path: Path):
+        raise OSError("file changed during audit")
+
+    monkeypatch.setattr(parsing_mod, "parse_file", fail_parse)
+    code = cli_mod.main(["audit", "--config", str(cfg_path)])
+    captured = capsys.readouterr()
+    assert code == 2
+    assert "changed during audit" in captured.err.lower()
+
+
+def test_audit_hard_preamble_only_file_returns_two(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    workspace, cards = _mk_workspace(tmp_path)
+    (workspace / "AGENTS.md").write_text("x" * 205)
+    cfg_path = _write_config(
+        tmp_path, workspace=workspace, cards=cards, soft=100, hard=200
+    )
+    code = cli_mod.main(["audit", "--config", str(cfg_path)])
+    captured = capsys.readouterr()
+    assert code == 2
+    assert "hard" in captured.err.lower()
+    assert "section" in captured.err.lower()
+
+
 def test_audit_all_keep_returns_zero(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -278,7 +396,9 @@ def test_audit_all_keep_returns_zero(
     workspace, cards = _mk_workspace(tmp_path)
     body = "## Section A\n\n" + ("x" * 500) + "\n"
     (workspace / "AGENTS.md").write_text(body)
-    cfg_path = _write_config(tmp_path, workspace=workspace, cards=cards)
+    cfg_path = _write_config(
+        tmp_path, workspace=workspace, cards=cards, hard=1000
+    )
 
     from bootstrap_doctor import judge as judge_mod
 
@@ -353,7 +473,9 @@ def test_audit_json_output_is_parseable(
     workspace, cards = _mk_workspace(tmp_path)
     body = "## Section A\n\n" + ("x" * 500) + "\n"
     (workspace / "AGENTS.md").write_text(body)
-    cfg_path = _write_config(tmp_path, workspace=workspace, cards=cards)
+    cfg_path = _write_config(
+        tmp_path, workspace=workspace, cards=cards, hard=1000
+    )
 
     from bootstrap_doctor import judge as judge_mod
 

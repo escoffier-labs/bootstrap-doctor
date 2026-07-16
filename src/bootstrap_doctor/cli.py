@@ -45,6 +45,9 @@ def _add_common(p: argparse.ArgumentParser) -> None:
     p.add_argument("--gateway-model", default=None, help="Gateway model id")
     p.add_argument("--soft-limit", type=int, default=None, help="Soft char limit")
     p.add_argument("--hard-limit", type=int, default=None, help="Hard char limit")
+    p.add_argument(
+        "--total-limit", type=int, default=None, help="Total workspace char limit"
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -157,6 +160,7 @@ def _resolve_cfg(args: argparse.Namespace, *, allow_missing_cards: bool):
         gateway_model=args.gateway_model,
         soft_limit=args.soft_limit,
         hard_limit=args.hard_limit,
+        total_limit=args.total_limit,
         allow_missing_cards=allow_missing_cards,
     )
 
@@ -208,9 +212,9 @@ def run_status(args: argparse.Namespace) -> int:
 def _collect_sections(cfg) -> list:
     """Walk every (workspace, tracked_file) pair and parse every file.
 
-    Returns one flat list of Section across all workspaces. Missing
-    files or unreadable bytes are skipped silently here; the status
-    verb is the place to surface those. An ``UnsafeTargetError`` on a
+    Returns one flat list of Section across all workspaces. Missing optional
+    files are skipped. Read and decode failures propagate so the audit
+    preflight cannot race into a false clean result. An ``UnsafeTargetError`` on a
     named workspace propagates so the top-level CLI can fail loudly:
     silently skipping a symlink-traversal misconfiguration would let
     the user mutate the wrong tree on the next trim. The exception
@@ -238,10 +242,7 @@ def _collect_sections(cfg) -> list:
             path = ws_dir / name
             if not path.exists() or not path.is_file():
                 continue
-            try:
-                sections.extend(parse_file(path))
-            except (OSError, UnicodeDecodeError):
-                continue
+            sections.extend(parse_file(path))
     return sections
 
 
@@ -321,14 +322,68 @@ def _render_audit_json(rows: list[tuple], cfg) -> str:
 
 def _run_audit_pipeline(
     args: argparse.Namespace, cfg
-) -> tuple[list, list, Any] | int:
-    """Shared between audit and trim. Returns (candidates, verdicts, stats),
+) -> tuple[list, list, Any, set[Path]] | int:
+    """Shared between audit and trim. Returns candidates, verdicts, stats, hard files,
     or an int exit code if there's nothing to do."""
     from bootstrap_doctor import judge as judge_mod
-    from bootstrap_doctor.heuristics import shortlist
+    from bootstrap_doctor import status as status_mod
+    from bootstrap_doctor.heuristics import Candidate, shortlist
 
-    sections = _collect_sections(cfg)
+    measurements = status_mod.collect(cfg)
+    unsafe = [
+        row
+        for row in measurements
+        if row.severity in {status_mod.SEV_MISSING, status_mod.SEV_UNREADABLE}
+    ]
+    if unsafe:
+        for row in unsafe:
+            _print_error(
+                f"cannot audit {row.path}: required bootstrap file is {row.severity}"
+            )
+        return 2
+
+    hard_paths = {
+        row.path for row in measurements if row.severity == status_mod.SEV_HARD
+    }
+
+    try:
+        sections = _collect_sections(cfg)
+    except (OSError, UnicodeDecodeError) as exc:
+        _print_error(
+            f"bootstrap input changed or became unreadable during audit: {exc}"
+        )
+        return 2
     candidates = shortlist(sections, cfg)
+    if hard_paths:
+        reviewable_paths = {
+            section.file
+            for section in sections
+            if section.file in hard_paths and section.heading_level in {2, 3}
+        }
+        unreviewable = hard_paths - reviewable_paths
+        if unreviewable:
+            for path in sorted(unreviewable):
+                _print_error(
+                    f"cannot audit hard-limit file {path}: no H2/H3 section is "
+                    "available for review"
+                )
+            return 2
+
+        existing = {candidate.section: candidate for candidate in candidates}
+        forced: list[Candidate] = []
+        for section in sections:
+            candidate = existing.get(section)
+            if candidate is not None:
+                if section.file in hard_paths and "hard-limit" not in candidate.reasons:
+                    candidate = Candidate(
+                        section=section,
+                        reasons=(*candidate.reasons, "hard-limit"),
+                        duplicate_of=candidate.duplicate_of,
+                    )
+                forced.append(candidate)
+            elif section.file in hard_paths and section.heading_level in {2, 3}:
+                forced.append(Candidate(section=section, reasons=("hard-limit",)))
+        candidates = forced
     if not candidates:
         print("no candidates flagged; nothing to audit.")
         return 0
@@ -341,7 +396,7 @@ def _run_audit_pipeline(
         if hasattr(args, "max_input_chars")
         else 200_000,
     )
-    return candidates, verdicts, stats
+    return candidates, verdicts, stats, hard_paths
 
 
 def run_audit(args: argparse.Namespace) -> int:
@@ -355,7 +410,7 @@ def run_audit(args: argparse.Namespace) -> int:
     result = _run_audit_pipeline(args, cfg)
     if isinstance(result, int):
         return result
-    candidates, verdicts, stats = result
+    candidates, verdicts, stats, hard_paths = result
 
     rows = list(zip(candidates, verdicts))
     if args.json:
@@ -364,6 +419,8 @@ def run_audit(args: argparse.Namespace) -> int:
         print(_render_audit_human(rows, cfg, stats))
 
     if stats.failures > 0:
+        return 2
+    if hard_paths:
         return 2
     actionable = any(v.decision in ("move", "unsure") for v in verdicts)
     return 1 if actionable else 0
@@ -392,7 +449,7 @@ def run_trim(args: argparse.Namespace) -> int:
     result = _run_audit_pipeline(args, cfg)
     if isinstance(result, int):
         return result
-    _candidates, verdicts, stats = result
+    _candidates, verdicts, stats, _hard_paths = result
 
     # Never mutate based on a partial audit. --force exists to bypass
     # dirty-git, not to override gateway failures: if the operator

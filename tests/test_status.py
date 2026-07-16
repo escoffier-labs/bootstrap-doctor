@@ -23,6 +23,7 @@ def make_cfg(
     *,
     soft: int = 10000,
     hard: int = 11500,
+    total: int = 60000,
     tracked: tuple[str, ...] = ("A.md",),
     named: tuple[str, ...] = (),
 ) -> Config:
@@ -43,6 +44,7 @@ workspace_dir = "{workspace}"
 cards_dir = "{cards}"
 soft_limit = {soft}
 hard_limit = {hard}
+total_limit = {total}
 tracked_files = [{tracked_list}]
 named_workspaces = [{named_list}]
 
@@ -92,11 +94,32 @@ def test_collect_single_file_ok(tmp_path: Path) -> None:
     assert row.workspace_label == "workspace"
     assert row.exists is True
     assert row.bytes == 6
-    assert row.chars == 6
+    assert row.chars == 5
     assert row.lines == 1
-    assert row.soft_remaining == 1000 - 6
-    assert row.hard_remaining == 1500 - 6
+    assert row.soft_remaining == 1000 - 5
+    assert row.hard_remaining == 1500 - 5
     assert row.severity == "ok"
+
+
+def test_collect_uses_openclaw_trimmed_utf16_character_count(tmp_path: Path) -> None:
+    cfg = make_cfg(tmp_path, soft=4, hard=10, tracked=("A.md",))
+    _write(cfg.workspace_dir / "A.md", "A\U0001f600B  \n")
+    row = collect(cfg)[0]
+    assert row.bytes == len("A\U0001f600B  \n".encode())
+    assert row.chars == 4
+    assert row.severity == "soft"
+
+
+@pytest.mark.parametrize(
+    ("suffix", "expected"),
+    [("\ufeff", 3), ("\u0085", 4), ("\u001c", 4)],
+)
+def test_collect_uses_ecmascript_trim_end_whitespace_set(
+    tmp_path: Path, suffix: str, expected: int
+) -> None:
+    cfg = make_cfg(tmp_path, soft=10, hard=20, tracked=("A.md",))
+    _write(cfg.workspace_dir / "A.md", "abc" + suffix)
+    assert collect(cfg)[0].chars == expected
 
 
 def test_collect_soft_range(tmp_path: Path) -> None:
@@ -124,11 +147,11 @@ def test_collect_just_under_soft_is_ok(tmp_path: Path) -> None:
     assert rows[0].severity == "ok"
 
 
-def test_collect_at_hard_boundary_is_hard(tmp_path: Path) -> None:
+def test_collect_at_hard_boundary_is_soft(tmp_path: Path) -> None:
     cfg = make_cfg(tmp_path, soft=100, hard=200, tracked=("A.md",))
     _write(cfg.workspace_dir / "A.md", "x" * 200)
     rows = collect(cfg)
-    assert rows[0].severity == "hard"
+    assert rows[0].severity == "soft"
 
 
 def test_collect_over_hard(tmp_path: Path) -> None:
@@ -153,6 +176,16 @@ def test_collect_missing_file(tmp_path: Path) -> None:
     # Deltas == limits exactly.
     assert row.soft_remaining == cfg.soft_limit
     assert row.hard_remaining == cfg.hard_limit
+
+
+@pytest.mark.parametrize("name", ["BOOTSTRAP.md", "MEMORY.md"])
+def test_collect_missing_openclaw_optional_file_is_not_an_error(
+    tmp_path: Path, name: str
+) -> None:
+    cfg = make_cfg(tmp_path, soft=100, hard=200, tracked=(name,))
+    row = collect(cfg)[0]
+    assert row.exists is False
+    assert row.severity == "optional"
 
 
 def test_collect_unreadable_file(tmp_path: Path) -> None:
@@ -385,9 +418,64 @@ def test_render_json_top_level_keys(tmp_path: Path) -> None:
     rows = collect(cfg)
     out = render_json(rows, cfg)
     data = json.loads(out)
-    assert set(data.keys()) >= {"soft_limit", "hard_limit", "rows"}
+    assert set(data.keys()) >= {
+        "soft_limit",
+        "hard_limit",
+        "total_limit",
+        "total_soft_limit",
+        "totals",
+        "rows",
+    }
     assert data["soft_limit"] == 100
     assert data["hard_limit"] == 200
+    assert data["total_limit"] == 60000
+
+
+def test_run_returns_one_at_total_soft_pressure(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    cfg = make_cfg(
+        tmp_path,
+        soft=100,
+        hard=200,
+        total=200,
+        tracked=("A.md", "B.md"),
+    )
+    _write(cfg.workspace_dir / "A.md", "x" * 90)
+    _write(cfg.workspace_dir / "B.md", "x" * 80)
+    code = run(cfg, as_json=True)
+    data = json.loads(capsys.readouterr().out)
+    assert code == 1
+    assert data["total_soft_limit"] == 170
+    assert data["totals"][0]["chars"] == 170
+    assert data["totals"][0]["severity"] == "soft"
+
+
+def test_run_returns_two_at_total_hard_pressure(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    cfg = make_cfg(
+        tmp_path,
+        soft=100,
+        hard=200,
+        total=200,
+        tracked=("A.md", "B.md"),
+    )
+    _write(cfg.workspace_dir / "A.md", "x" * 101)
+    _write(cfg.workspace_dir / "B.md", "x" * 100)
+    code = run(cfg, as_json=True)
+    data = json.loads(capsys.readouterr().out)
+    assert code == 2
+    assert data["totals"][0]["chars"] == 201
+    assert data["totals"][0]["severity"] == "hard"
+
+
+def test_run_returns_zero_for_missing_optional_file(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    cfg = make_cfg(tmp_path, soft=100, hard=200, tracked=("BOOTSTRAP.md",))
+    assert run(cfg) == 0
+    assert "OPTIONAL" in capsys.readouterr().out
 
 
 def test_render_json_row_count(tmp_path: Path) -> None:
