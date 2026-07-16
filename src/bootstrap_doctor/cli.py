@@ -317,7 +317,7 @@ def _render_audit_json(rows: list[tuple], cfg) -> str:
 
 def _run_audit_pipeline(
     args: argparse.Namespace, cfg
-) -> tuple[list, list, Any, set[Path], set[Path]] | int:
+) -> tuple[list, list, Any, set[Path], set[Path], int] | int:
     """Return audit results plus hard files and hard aggregate workspaces."""
     from bootstrap_doctor import judge as judge_mod
     from bootstrap_doctor import status as status_mod
@@ -336,12 +336,14 @@ def _run_audit_pipeline(
             )
         return 2
 
+    totals = status_mod.collect_totals(measurements, cfg)
+    status_code = status_mod._exit_code(measurements, totals)
     hard_paths = {
         row.path for row in measurements if row.severity == status_mod.SEV_HARD
     }
     hard_workspaces = {
         total.path
-        for total in status_mod.collect_totals(measurements, cfg)
+        for total in totals
         if total.severity == status_mod.SEV_HARD
     }
 
@@ -422,7 +424,7 @@ def _run_audit_pipeline(
         if hasattr(args, "max_input_chars")
         else 200_000,
     )
-    return candidates, verdicts, stats, hard_paths, hard_workspaces
+    return candidates, verdicts, stats, hard_paths, hard_workspaces, status_code
 
 
 def run_audit(args: argparse.Namespace) -> int:
@@ -436,7 +438,7 @@ def run_audit(args: argparse.Namespace) -> int:
     result = _run_audit_pipeline(args, cfg)
     if isinstance(result, int):
         return result
-    candidates, verdicts, stats, hard_paths, hard_workspaces = result
+    candidates, verdicts, stats, hard_paths, hard_workspaces, _status_code = result
 
     rows = list(zip(candidates, verdicts))
     if args.json:
@@ -476,7 +478,14 @@ def run_trim(args: argparse.Namespace) -> int:
     result = _run_audit_pipeline(args, cfg)
     if isinstance(result, int):
         return result
-    _candidates, verdicts, stats, hard_paths, hard_workspaces = result
+    (
+        _candidates,
+        verdicts,
+        stats,
+        hard_paths,
+        hard_workspaces,
+        status_code,
+    ) = result
 
     # Never mutate based on a partial audit. --force exists to bypass
     # dirty-git, not to override gateway failures: if the operator
@@ -491,7 +500,7 @@ def run_trim(args: argparse.Namespace) -> int:
     move_verdicts = [v for v in verdicts if v.decision == "move"]
     if not move_verdicts:
         print("no actions to take.")
-        return 2 if hard_paths or hard_workspaces else 0
+        return 2 if hard_paths or hard_workspaces else status_code
 
     actions = trim_mod.build_plan(
         move_verdicts, cfg, existing_card_collision=args.collision
@@ -502,12 +511,12 @@ def run_trim(args: argparse.Namespace) -> int:
         print(trim_mod.render_plan(actions, cfg))
         if not actions:
             print("no actions to take.")
-            return 2 if hard_paths or hard_workspaces else 0
-        return 2 if hard_paths or hard_workspaces else 0
+            return 2 if hard_paths or hard_workspaces else status_code
+        return 2 if hard_paths or hard_workspaces else status_code
 
     if not actions:
         print("no actions to take.")
-        return 2 if hard_paths or hard_workspaces else 0
+        return 2 if hard_paths or hard_workspaces else status_code
 
     print(trim_mod.render_plan(actions, cfg))
 

@@ -659,7 +659,10 @@ def test_apply_revalidates_each_source_immediately_before_write(
         cfg.cards_dir / "tool-setup-notes.md",
     )
     assert exc.value.cards_written == expected_cards
+    assert exc.value.files_changed == (agents,)
+    assert exc.value.failed_path == tools
     assert all(card.exists() for card in expected_cards)
+    assert "agent-setup-notes.md" in agents.read_text()
     assert tools.read_text() == concurrent
 
 

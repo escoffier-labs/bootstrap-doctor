@@ -68,24 +68,25 @@ _MAX_RENAME_ATTEMPTS = 10
 
 
 class CardWriteError(Exception):
-    """A card write failed during apply_plan after partial progress.
+    """An apply step failed after partial progress.
 
-    Apply aborts before touching any bootstrap file. ``cards_written``
-    lists the cards that landed on disk before the failure so the
-    operator can clean up or rerun.
+    ``cards_written`` and ``files_changed`` list mutations completed before
+    the failure so the operator can clean up or rerun safely.
     """
 
     def __init__(
         self,
         message: str,
         *,
-        failed_card: Path,
+        failed_path: Path,
         cards_written: tuple[Path, ...],
+        files_changed: tuple[Path, ...],
         cause: Exception | None = None,
     ) -> None:
         super().__init__(message)
-        self.failed_card = failed_card
+        self.failed_path = failed_path
         self.cards_written = cards_written
+        self.files_changed = files_changed
         self.__cause__ = cause
 
 
@@ -665,7 +666,9 @@ def apply_plan(
             source_snapshots[bootstrap_path] = snapshot
             survivors.extend(file_survivors)
 
-    _validate_projected_sources(cfg, source_snapshots, cards_written)
+    _validate_projected_sources(
+        cfg, source_snapshots, cards_written, files_changed
+    )
 
     # Phase 2: write every surviving card BEFORE any bootstrap is
     # touched. If any card write fails, no bootstrap rewrite runs.
@@ -687,8 +690,9 @@ def apply_plan(
                 f"card path appeared between resolve and write: {card_path} "
                 f"({len(cards_written)} card(s) written before; "
                 "no bootstrap files modified)",
-                failed_card=card_path,
+                failed_path=card_path,
                 cards_written=tuple(cards_written),
+                files_changed=tuple(files_changed),
                 cause=exc,
             ) from exc
         except OSError as exc:
@@ -696,8 +700,9 @@ def apply_plan(
                 f"card write failed at {card_path}: {exc} "
                 f"({len(cards_written)} card(s) written before failure; "
                 "no bootstrap files modified)",
-                failed_card=card_path,
+                failed_path=card_path,
                 cards_written=tuple(cards_written),
+                files_changed=tuple(files_changed),
                 cause=exc,
             ) from exc
         cards_written.append(card_path)
@@ -709,6 +714,7 @@ def apply_plan(
             bootstrap_path,
             source_snapshots[bootstrap_path],
             cards_written,
+            files_changed,
         )
         atomic_write_text(bootstrap_path, new_text)
         files_changed.append(bootstrap_path)
@@ -726,11 +732,12 @@ def _validate_projected_sources(
     cfg: Config,
     source_snapshots: dict[Path, FileSnapshot],
     cards_written: list[Path],
+    files_changed: list[Path],
 ) -> None:
     """Abort if any projected source changed since its phase-1 read."""
     for bootstrap_path, snapshot in source_snapshots.items():
         _validate_projected_source(
-            cfg, bootstrap_path, snapshot, cards_written
+            cfg, bootstrap_path, snapshot, cards_written, files_changed
         )
 
 
@@ -739,6 +746,7 @@ def _validate_projected_source(
     bootstrap_path: Path,
     snapshot: FileSnapshot,
     cards_written: list[Path],
+    files_changed: list[Path],
 ) -> None:
     """Preserve card evidence when a projected source is no longer safe."""
     try:
@@ -746,9 +754,11 @@ def _validate_projected_source(
     except (OSError, UnsafeTargetError) as exc:
         raise CardWriteError(
             f"bootstrap source changed before rewrite: {bootstrap_path} "
-            f"({len(cards_written)} card(s) written)",
-            failed_card=bootstrap_path,
+            f"({len(cards_written)} card(s) written; "
+            f"{len(files_changed)} bootstrap file(s) modified)",
+            failed_path=bootstrap_path,
             cards_written=tuple(cards_written),
+            files_changed=tuple(files_changed),
             cause=exc,
         ) from exc
 

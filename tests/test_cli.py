@@ -971,8 +971,9 @@ def test_trim_card_write_error_returns_two(
         target = cards / "big-section.md"
         raise trim_mod.CardWriteError(
             "card write failed at big-section.md",
-            failed_card=target,
+            failed_path=target,
             cards_written=(),
+            files_changed=(),
         )
 
     monkeypatch.setattr(judge_mod, "judge_all", fake_judge_all)
@@ -985,7 +986,7 @@ def test_trim_card_write_error_returns_two(
     assert "unexpected error" not in captured.err
 
 
-def test_trim_no_actions_returns_zero(
+def test_trim_no_actions_preserves_soft_pressure_exit_one(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -1023,7 +1024,7 @@ def test_trim_no_actions_returns_zero(
 
     code = cli_mod.main(["trim", "--config", str(cfg_path)])
     captured = capsys.readouterr()
-    assert code == 0
+    assert code == 1
     assert "no actions" in captured.out.lower()
 
 
