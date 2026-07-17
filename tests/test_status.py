@@ -2,14 +2,19 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
 from bootstrap_doctor.paths import Config, resolve_config
+from bootstrap_doctor.safety import UnsafeTargetError
 from bootstrap_doctor.status import (
     FileStatus,
     collect,
+    collect_totals,
     render_json,
     render_text,
     run,
@@ -23,6 +28,7 @@ def make_cfg(
     *,
     soft: int = 10000,
     hard: int = 11500,
+    total: int = 60000,
     tracked: tuple[str, ...] = ("A.md",),
     named: tuple[str, ...] = (),
 ) -> Config:
@@ -43,6 +49,7 @@ workspace_dir = "{workspace}"
 cards_dir = "{cards}"
 soft_limit = {soft}
 hard_limit = {hard}
+total_limit = {total}
 tracked_files = [{tracked_list}]
 named_workspaces = [{named_list}]
 
@@ -92,11 +99,40 @@ def test_collect_single_file_ok(tmp_path: Path) -> None:
     assert row.workspace_label == "workspace"
     assert row.exists is True
     assert row.bytes == 6
-    assert row.chars == 6
+    assert row.chars == 5
     assert row.lines == 1
-    assert row.soft_remaining == 1000 - 6
-    assert row.hard_remaining == 1500 - 6
+    assert row.soft_remaining == 1000 - 5
+    assert row.hard_remaining == 1500 - 5
     assert row.severity == "ok"
+
+
+def test_collect_uses_openclaw_trimmed_utf16_character_count(tmp_path: Path) -> None:
+    cfg = make_cfg(tmp_path, soft=4, hard=10, tracked=("A.md",))
+    _write(cfg.workspace_dir / "A.md", "A\U0001f600B  \n")
+    row = collect(cfg)[0]
+    assert row.bytes == len("A\U0001f600B  \n".encode())
+    assert row.chars == 4
+    assert row.severity == "soft"
+
+
+def test_collect_preserves_crlf_for_openclaw_character_count(tmp_path: Path) -> None:
+    cfg = make_cfg(tmp_path, soft=10, hard=20, tracked=("A.md",))
+    (cfg.workspace_dir / "A.md").write_bytes(b"a\r\nb")
+    row = collect(cfg)[0]
+    assert row.bytes == 4
+    assert row.chars == 4
+
+
+@pytest.mark.parametrize(
+    ("suffix", "expected"),
+    [("\ufeff", 3), ("\u0085", 4), ("\u001c", 4)],
+)
+def test_collect_uses_ecmascript_trim_end_whitespace_set(
+    tmp_path: Path, suffix: str, expected: int
+) -> None:
+    cfg = make_cfg(tmp_path, soft=10, hard=20, tracked=("A.md",))
+    _write(cfg.workspace_dir / "A.md", "abc" + suffix)
+    assert collect(cfg)[0].chars == expected
 
 
 def test_collect_soft_range(tmp_path: Path) -> None:
@@ -124,11 +160,11 @@ def test_collect_just_under_soft_is_ok(tmp_path: Path) -> None:
     assert rows[0].severity == "ok"
 
 
-def test_collect_at_hard_boundary_is_hard(tmp_path: Path) -> None:
+def test_collect_at_hard_boundary_is_soft(tmp_path: Path) -> None:
     cfg = make_cfg(tmp_path, soft=100, hard=200, tracked=("A.md",))
     _write(cfg.workspace_dir / "A.md", "x" * 200)
     rows = collect(cfg)
-    assert rows[0].severity == "hard"
+    assert rows[0].severity == "soft"
 
 
 def test_collect_over_hard(tmp_path: Path) -> None:
@@ -153,6 +189,195 @@ def test_collect_missing_file(tmp_path: Path) -> None:
     # Deltas == limits exactly.
     assert row.soft_remaining == cfg.soft_limit
     assert row.hard_remaining == cfg.hard_limit
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "SOUL.md",
+        "IDENTITY.md",
+        "USER.md",
+        "HEARTBEAT.md",
+        "BOOTSTRAP.md",
+        "MEMORY.md",
+    ],
+)
+def test_collect_missing_openclaw_optional_file_is_not_an_error(
+    tmp_path: Path, name: str
+) -> None:
+    cfg = make_cfg(tmp_path, soft=100, hard=200, tracked=(name,))
+    row = collect(cfg)[0]
+    assert row.exists is False
+    assert row.severity == "optional"
+
+
+def test_collect_fifo_returns_promptly_as_unreadable(tmp_path: Path) -> None:
+    cfg = make_cfg(tmp_path, soft=100, hard=200, tracked=("A.md",))
+    os.mkfifo(cfg.workspace_dir / "A.md")
+    source_root = Path(__file__).parents[1] / "src"
+    script = (
+        "import sys; "
+        "from bootstrap_doctor.paths import resolve_config; "
+        "from bootstrap_doctor.status import run; "
+        "raise SystemExit(run(resolve_config(config_file=sys.argv[1])))"
+    )
+    completed = subprocess.run(
+        [sys.executable, "-c", script, str(tmp_path / "config.toml")],
+        capture_output=True,
+        text=True,
+        timeout=2,
+        env={**os.environ, "PYTHONPATH": str(source_root)},
+        check=False,
+    )
+    assert completed.returncode == 2
+    assert "UNREAD" in completed.stdout
+
+
+def test_collect_rejects_final_symlink_swap_before_open(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cfg = make_cfg(tmp_path, soft=100, hard=200, tracked=("A.md",))
+    tracked = _write(cfg.workspace_dir / "A.md", "inside")
+    outside = _write(tmp_path / "outside.md", "outside secret")
+    from bootstrap_doctor import status as status_mod
+
+    original_ensure = status_mod.ensure_within
+    swapped = False
+
+    def ensure_then_swap(base: Path, candidate: Path) -> Path:
+        nonlocal swapped
+        resolved = original_ensure(base, candidate)
+        if candidate == tracked and not swapped:
+            tracked.unlink()
+            tracked.symlink_to(outside)
+            swapped = True
+        return resolved
+
+    monkeypatch.setattr(status_mod, "ensure_within", ensure_then_swap)
+    row = collect(cfg)[0]
+    assert row.severity == "unreadable"
+    assert row.chars == 0
+
+
+def test_collect_rejects_multichunk_overwrite_with_replayed_mtime(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cfg = make_cfg(
+        tmp_path,
+        soft=3_000_000,
+        hard=4_000_000,
+        tracked=("A.md",),
+    )
+    tracked = cfg.workspace_dir / "A.md"
+    chunk_size = 1024 * 1024
+    tracked.write_bytes(b"A" * (chunk_size * 2))
+    original = tracked.stat()
+    from bootstrap_doctor import status as status_mod
+
+    real_read = status_mod.os.read
+    read_count = 0
+
+    def overwrite_after_first_chunk(fd: int, count: int) -> bytes:
+        nonlocal read_count
+        chunk = real_read(fd, count)
+        read_count += 1
+        if read_count == 1:
+            writer = os.open(tracked, os.O_WRONLY)
+            try:
+                os.pwrite(writer, b"B" * original.st_size, 0)
+            finally:
+                os.close(writer)
+            os.utime(
+                tracked,
+                ns=(original.st_atime_ns, original.st_mtime_ns),
+            )
+            changed = tracked.stat()
+            assert changed.st_ino == original.st_ino
+            assert changed.st_size == original.st_size
+            assert changed.st_mtime_ns == original.st_mtime_ns
+            assert changed.st_ctime_ns != original.st_ctime_ns
+        return chunk
+
+    monkeypatch.setattr(status_mod.os, "read", overwrite_after_first_chunk)
+
+    row = collect(cfg)[0]
+
+    assert read_count >= 3
+    assert row.severity == "unreadable"
+    assert row.chars == 0
+
+
+def test_collect_rejects_multichunk_parent_rename_path_drift(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cfg = make_cfg(
+        tmp_path,
+        soft=3_000_000,
+        hard=4_000_000,
+        tracked=("A.md",),
+    )
+    tracked = cfg.workspace_dir / "A.md"
+    size = 2 * 1024 * 1024
+    tracked.write_bytes(b"A" * size)
+    original = tracked.stat()
+    moved_workspace = tmp_path / "workspace-moved"
+    from bootstrap_doctor import status as status_mod
+
+    real_read = status_mod.os.read
+    read_count = 0
+
+    def rename_parent_after_first_chunk(fd: int, count: int) -> bytes:
+        nonlocal read_count
+        chunk = real_read(fd, count)
+        read_count += 1
+        if read_count == 1:
+            cfg.workspace_dir.rename(moved_workspace)
+            moved = (moved_workspace / "A.md").stat()
+            assert moved.st_ino == original.st_ino
+            assert moved.st_size == original.st_size
+            assert moved.st_mtime_ns == original.st_mtime_ns
+            assert moved.st_ctime_ns == original.st_ctime_ns
+        return chunk
+
+    monkeypatch.setattr(status_mod.os, "read", rename_parent_after_first_chunk)
+
+    row = collect(cfg)[0]
+
+    assert read_count >= 3
+    assert row.severity == "unreadable"
+    assert row.chars == 0
+
+
+def test_collect_accepts_stable_multichunk_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cfg = make_cfg(
+        tmp_path,
+        soft=3_000_000,
+        hard=4_000_000,
+        tracked=("A.md",),
+    )
+    tracked = cfg.workspace_dir / "A.md"
+    size = 2 * 1024 * 1024 + 17
+    tracked.write_bytes(b"A" * size)
+    from bootstrap_doctor import status as status_mod
+
+    real_read = status_mod.os.read
+    read_count = 0
+
+    def count_reads(fd: int, count: int) -> bytes:
+        nonlocal read_count
+        read_count += 1
+        return real_read(fd, count)
+
+    monkeypatch.setattr(status_mod.os, "read", count_reads)
+
+    row = collect(cfg)[0]
+
+    assert read_count >= 4
+    assert row.severity == "ok"
+    assert row.bytes == size
+    assert row.chars == size
 
 
 def test_collect_unreadable_file(tmp_path: Path) -> None:
@@ -290,6 +515,273 @@ def test_collect_path_is_absolute(tmp_path: Path) -> None:
     assert rows[0].path.name == "A.md"
 
 
+def test_collect_rejects_tracked_file_symlink_escape(tmp_path: Path) -> None:
+    cfg = make_cfg(tmp_path, soft=100, hard=200, tracked=("A.md",))
+    outside = tmp_path / "outside.md"
+    outside.write_text("secret")
+    (cfg.workspace_dir / "A.md").symlink_to(outside)
+
+    with pytest.raises(UnsafeTargetError):
+        collect(cfg)
+
+
+def test_collect_totals_keeps_same_label_workspaces_separate(tmp_path: Path) -> None:
+    cfg = make_cfg(
+        tmp_path,
+        soft=100,
+        hard=200,
+        total=500,
+        tracked=("A.md",),
+        named=("workspace",),
+    )
+    _write(cfg.workspace_dir / "A.md", "x" * 10)
+    nested = cfg.workspace_dir / "workspace"
+    nested.mkdir()
+    _write(nested / "A.md", "x" * 20)
+
+    totals = collect_totals(collect(cfg), cfg)
+    assert [(total.path, total.chars) for total in totals] == [
+        (cfg.workspace_dir, 10),
+        (nested, 20),
+    ]
+
+
+def test_collect_totals_caps_each_file_at_openclaw_limit(tmp_path: Path) -> None:
+    cfg = make_cfg(
+        tmp_path,
+        soft=50,
+        hard=100,
+        total=150,
+        tracked=("A.md", "B.md"),
+    )
+    _write(cfg.workspace_dir / "A.md", "x" * 200)
+    _write(cfg.workspace_dir / "B.md", "x" * 10)
+
+    total = collect_totals(collect(cfg), cfg)[0]
+    assert total.chars == 110
+    assert total.severity == "ok"
+
+
+def test_collect_totals_uses_openclaw_agents_policy_digest_length(
+    tmp_path: Path,
+) -> None:
+    cfg = make_cfg(
+        tmp_path,
+        soft=17000,
+        hard=20000,
+        total=60000,
+        tracked=("AGENTS.md",),
+    )
+    _write(cfg.workspace_dir / "AGENTS.md", "x" * 30000)
+
+    rows = collect(cfg)
+    total = collect_totals(rows, cfg)[0]
+
+    assert rows[0].chars == 30000
+    assert rows[0].severity == "hard"
+    assert total.chars == 12116
+
+
+@pytest.mark.parametrize(
+    ("line", "size", "expected_injected_chars"),
+    [
+        ("érequiredé\n", 36500, 19185),
+        ("中required中\n", 36500, 19185),
+        ("securİty\n", 33500, 12116),
+        ("securıty\n", 33500, 12116),
+        ("ſrequiredſ\n", 36500, 12116),
+        ("KrequiredK\n", 36500, 12116),
+    ],
+)
+def test_collect_totals_matches_javascript_iu_policy_boundaries(
+    tmp_path: Path, line: str, size: int, expected_injected_chars: int
+) -> None:
+    cfg = make_cfg(
+        tmp_path,
+        soft=17000,
+        hard=20000,
+        total=60000,
+        tracked=("AGENTS.md",),
+    )
+    content = (line * (size // len(line) + 1))[:size]
+    _write(cfg.workspace_dir / "AGENTS.md", content)
+
+    total = collect_totals(collect(cfg), cfg)[0]
+
+    assert total.chars == expected_injected_chars
+
+
+def test_collect_totals_matches_javascript_ascii_ordered_list_prefix(
+    tmp_path: Path,
+) -> None:
+    cfg = make_cfg(
+        tmp_path,
+        soft=17000,
+        hard=20000,
+        total=60000,
+        tracked=("AGENTS.md",),
+    )
+    line = "١. note\n"
+    size = 30000
+    content = (line * (size // len(line) + 1))[:size]
+    _write(cfg.workspace_dir / "AGENTS.md", content)
+
+    total = collect_totals(collect(cfg), cfg)[0]
+
+    assert total.chars == 12116
+
+
+@pytest.mark.parametrize(
+    ("name", "size", "expected_injected_chars"),
+    [
+        ("AGENTS.md", 19999, 19999),
+        ("TOOLS.md", 30000, 20000),
+    ],
+)
+def test_collect_totals_preserves_agents_boundary_and_tools_cap(
+    tmp_path: Path, name: str, size: int, expected_injected_chars: int
+) -> None:
+    cfg = make_cfg(
+        tmp_path,
+        soft=17000,
+        hard=20000,
+        total=60000,
+        tracked=(name,),
+    )
+    _write(cfg.workspace_dir / name, "x" * size)
+
+    total = collect_totals(collect(cfg), cfg)[0]
+
+    assert total.chars == expected_injected_chars
+
+
+def test_collect_totals_counts_missing_marker_across_total_limit(
+    tmp_path: Path,
+) -> None:
+    cfg = make_cfg(
+        tmp_path,
+        soft=17000,
+        hard=20000,
+        total=60000,
+        tracked=("A.md",),
+    )
+    workspace = Path("/workspace/abcdefghijkl")
+    rows = [
+        FileStatus(
+            path=workspace / name,
+            workspace_label="workspace",
+            name=name,
+            exists=True,
+            bytes=chars,
+            chars=chars,
+            lines=1,
+            soft_remaining=17000 - chars,
+            hard_remaining=20000 - chars,
+            severity="soft",
+        )
+        for name, chars in (
+            ("AGENTS.md", 20000),
+            ("TOOLS.md", 20000),
+            ("IDENTITY.md", 19950),
+        )
+    ]
+    rows.insert(
+        1,
+        FileStatus(
+            path=workspace / "SOUL.md",
+            workspace_label="workspace",
+            name="SOUL.md",
+            exists=False,
+            bytes=0,
+            chars=0,
+            lines=0,
+            soft_remaining=17000,
+            hard_remaining=20000,
+            severity="optional",
+        ),
+    )
+    marker = f"[MISSING] Expected at: {workspace / 'SOUL.md'}"
+    assert len(marker.encode("utf-16-le")) // 2 == 54
+
+    total = collect_totals(rows, cfg)[0]
+
+    assert total.chars == 60004
+    assert total.severity == "hard"
+
+
+def test_collect_totals_counts_surrogateescaped_missing_marker(
+    tmp_path: Path,
+) -> None:
+    cfg = make_cfg(
+        tmp_path,
+        soft=17000,
+        hard=20000,
+        total=60000,
+        tracked=("SOUL.md",),
+    )
+    path = Path("/workspace/invalid-\udcff/SOUL.md")
+    row = FileStatus(
+        path=path,
+        workspace_label="workspace",
+        name="SOUL.md",
+        exists=False,
+        bytes=0,
+        chars=0,
+        lines=0,
+        soft_remaining=cfg.soft_limit,
+        hard_remaining=cfg.hard_limit,
+        severity="optional",
+    )
+
+    total = collect_totals([row], cfg)[0]
+
+    marker = f"[MISSING] Expected at: {path}"
+    assert total.chars == len(marker)
+
+
+@pytest.mark.parametrize(
+    ("name", "retained_when_missing"),
+    [
+        ("AGENTS.md", True),
+        ("SOUL.md", True),
+        ("TOOLS.md", True),
+        ("IDENTITY.md", True),
+        ("USER.md", True),
+        ("HEARTBEAT.md", True),
+        ("BOOTSTRAP.md", True),
+        ("MEMORY.md", False),
+        ("CUSTOM.md", False),
+    ],
+)
+def test_collect_totals_matches_openclaw_missing_marker_set_and_utf16(
+    tmp_path: Path, name: str, retained_when_missing: bool
+) -> None:
+    cfg = make_cfg(
+        tmp_path,
+        soft=17000,
+        hard=20000,
+        total=60000,
+        tracked=("A.md",),
+    )
+    path = Path("/workspace/\U0001f600") / name
+    row = FileStatus(
+        path=path,
+        workspace_label="workspace",
+        name=name,
+        exists=False,
+        bytes=0,
+        chars=0,
+        lines=0,
+        soft_remaining=17000,
+        hard_remaining=20000,
+        severity="optional",
+    )
+    marker = f"[MISSING] Expected at: {path}"
+    expected = len(marker.encode("utf-16-le")) // 2 if retained_when_missing else 0
+
+    assert collect_totals([row], cfg)[0].chars == expected
+
+
 # render_text() -----------------------------------------------------------
 
 
@@ -385,9 +877,64 @@ def test_render_json_top_level_keys(tmp_path: Path) -> None:
     rows = collect(cfg)
     out = render_json(rows, cfg)
     data = json.loads(out)
-    assert set(data.keys()) >= {"soft_limit", "hard_limit", "rows"}
+    assert set(data.keys()) >= {
+        "soft_limit",
+        "hard_limit",
+        "total_limit",
+        "total_soft_limit",
+        "totals",
+        "rows",
+    }
     assert data["soft_limit"] == 100
     assert data["hard_limit"] == 200
+    assert data["total_limit"] == 60000
+
+
+def test_run_returns_one_at_total_soft_pressure(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    cfg = make_cfg(
+        tmp_path,
+        soft=100,
+        hard=200,
+        total=200,
+        tracked=("A.md", "B.md"),
+    )
+    _write(cfg.workspace_dir / "A.md", "x" * 90)
+    _write(cfg.workspace_dir / "B.md", "x" * 80)
+    code = run(cfg, as_json=True)
+    data = json.loads(capsys.readouterr().out)
+    assert code == 1
+    assert data["total_soft_limit"] == 170
+    assert data["totals"][0]["chars"] == 170
+    assert data["totals"][0]["severity"] == "soft"
+
+
+def test_run_returns_two_at_total_hard_pressure(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    cfg = make_cfg(
+        tmp_path,
+        soft=100,
+        hard=200,
+        total=200,
+        tracked=("A.md", "B.md"),
+    )
+    _write(cfg.workspace_dir / "A.md", "x" * 101)
+    _write(cfg.workspace_dir / "B.md", "x" * 100)
+    code = run(cfg, as_json=True)
+    data = json.loads(capsys.readouterr().out)
+    assert code == 2
+    assert data["totals"][0]["chars"] == 201
+    assert data["totals"][0]["severity"] == "hard"
+
+
+def test_run_returns_zero_for_missing_optional_file(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    cfg = make_cfg(tmp_path, soft=100, hard=200, tracked=("BOOTSTRAP.md",))
+    assert run(cfg) == 0
+    assert "OPTIONAL" in capsys.readouterr().out
 
 
 def test_render_json_row_count(tmp_path: Path) -> None:

@@ -93,32 +93,35 @@ def _reject_control_chars(value: str, label: str) -> None:
             f"{label} must not start with '#' (would parse as markdown heading)"
         )
 
-#: Verbatim system prompt; see module docstring for context.
-SYSTEM_PROMPT = (
-    'You audit OpenClaw bootstrap files. Each bootstrap file is loaded into '
-    "every session's prompt prefix and has a ~12000 char soft ceiling. You "
-    'decide whether a given section should stay loaded ("keep") or move to a '
-    'memory card ("move") for retrieval later. If a section is ambiguous, '
-    'return "unsure".\n\n'
-    "KEEP if the section is: active rules, currently-relevant state, "
-    "identity, safety constraints, frequently-referenced infrastructure, or "
-    "rapidly-evolving project context.\n\n"
-    "MOVE if the section is: historical session logs, one-off setup notes, "
-    "exemplar content, deep architectural detail that is rarely referenced, "
-    "deprecated state, or anything older than 60 days that has not been "
-    "updated.\n\n"
-    "Respond with strict JSON only. No prose, no markdown, no code fences. "
-    "Schema:\n"
-    "{\n"
-    '  "decision": "keep" | "move" | "unsure",\n'
-    '  "topic": string (5-8 words, empty if not "move"),\n'
-    '  "category": "infrastructure" | "workflow" | "research" | "tools" | '
-    '"session-log" | "deprecated" | "" (empty if not "move"),\n'
-    '  "tags": [string, ...] (up to 5, empty if not "move"),\n'
-    '  "hook": string (one line, under 80 chars, empty if not "move"),\n'
-    '  "reasoning": string (one sentence)\n'
-    "}"
-)
+def _system_prompt(cfg: Config) -> str:
+    """Build verdict guidance from the fully resolved runtime configuration."""
+    return (
+        'You audit OpenClaw bootstrap files. Each bootstrap file is loaded into '
+        "every session's prompt prefix. Bootstrap Doctor warns at "
+        f"{cfg.soft_limit:,} characters, and OpenClaw caps each bootstrap "
+        f"file at {cfg.hard_limit:,} characters. You "
+        'decide whether a given section should stay loaded ("keep") or move to a '
+        'memory card ("move") for retrieval later. If a section is ambiguous, '
+        'return "unsure".\n\n'
+        "KEEP if the section is: active rules, currently-relevant state, "
+        "identity, safety constraints, frequently-referenced infrastructure, or "
+        "rapidly-evolving project context.\n\n"
+        "MOVE if the section is: historical session logs, one-off setup notes, "
+        "exemplar content, deep architectural detail that is rarely referenced, "
+        "deprecated state, or anything older than 60 days that has not been "
+        "updated.\n\n"
+        "Respond with strict JSON only. No prose, no markdown, no code fences. "
+        "Schema:\n"
+        "{\n"
+        '  "decision": "keep" | "move" | "unsure",\n'
+        '  "topic": string (5-8 words, empty if not "move"),\n'
+        '  "category": "infrastructure" | "workflow" | "research" | "tools" | '
+        '"session-log" | "deprecated" | "" (empty if not "move"),\n'
+        '  "tags": [string, ...] (up to 5, empty if not "move"),\n'
+        '  "hook": string (one line, under 80 chars, empty if not "move"),\n'
+        '  "reasoning": string (one sentence)\n'
+        "}"
+    )
 
 
 # --- Public dataclasses -----------------------------------------------------
@@ -282,24 +285,25 @@ def _user_prompt(candidate: Candidate) -> str:
     )
 
 
-def _build_payload(candidate: Candidate, model: str) -> tuple[dict[str, Any], int]:
+def _build_payload(candidate: Candidate, cfg: Config) -> tuple[dict[str, Any], int]:
     """Build the OpenAI-compatible request body and report its prompt char count.
 
     The reported char count is system_prompt + user_prompt length, which
     is what we charge against the per-run ``max_input_chars`` budget.
     """
+    system = _system_prompt(cfg)
     user = _user_prompt(candidate)
     payload = {
-        "model": model,
+        "model": cfg.gateway_model,
         "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": system},
             {"role": "user", "content": user},
         ],
         "response_format": {"type": "json_object"},
         "temperature": 0.0,
         "max_tokens": 400,
     }
-    return payload, len(SYSTEM_PROMPT) + len(user)
+    return payload, len(system) + len(user)
 
 
 def _auth_headers() -> dict[str, str] | None:
@@ -483,7 +487,7 @@ def _call_gateway(
     """
     section = candidate.section
     body_sha = _sha256(section.body)
-    payload, prompt_chars = _build_payload(candidate, cfg.gateway_model)
+    payload, prompt_chars = _build_payload(candidate, cfg)
     url = cfg.gateway_url.rstrip("/") + "/v1/chat/completions"
     try:
         response = http_post(url, payload)
@@ -610,7 +614,7 @@ def judge_all(
         # Budget pre-check: rough char count for this candidate. Strategy
         # is "simple bail": if this one would push us over, mark it and
         # every later candidate as budget_exceeded.
-        _, prompt_chars = _build_payload(candidate, cfg.gateway_model)
+        _, prompt_chars = _build_payload(candidate, cfg)
         if stats.total_input_chars + prompt_chars > max_input_chars:
             budget_blown = True
             verdicts.append(_budget_verdict(section, body_sha))

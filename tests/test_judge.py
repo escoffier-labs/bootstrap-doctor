@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import time
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -195,6 +196,7 @@ def test_judge_stats_defaults_zero() -> None:
 
 
 def test_move_response_populates_verdict(cfg: Config) -> None:
+    cfg = replace(cfg, soft_limit=1_234, hard_limit=2_345)
     sec = make_section(body="A historical session log of yesterday's work.")
     cand = make_candidate(sec)
 
@@ -232,6 +234,12 @@ def test_move_response_populates_verdict(cfg: Config) -> None:
     assert isinstance(payload["messages"], list)
     assert payload["messages"][0]["role"] == "system"
     assert payload["messages"][1]["role"] == "user"
+    system_prompt = payload["messages"][0]["content"]
+    assert "Bootstrap Doctor warns at 1,234 characters" in system_prompt
+    assert "OpenClaw caps each bootstrap file at 2,345 characters" in system_prompt
+    assert "17,000" not in system_prompt
+    assert "20,000" not in system_prompt
+    assert "12000" not in system_prompt
     # User prompt mentions the section heading and reasons.
     assert "Setup" in payload["messages"][1]["content"]
     assert "large" in payload["messages"][1]["content"]

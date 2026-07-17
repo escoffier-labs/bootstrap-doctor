@@ -14,9 +14,10 @@ TOML schema:
     cards_dir = "~/.openclaw/workspace/memory/cards"
     gateway_url = "http://localhost:11434"
     gateway_model = "deepseek-v4-pro:cloud"
-    soft_limit = 10000
-    hard_limit = 11500
-    tracked_files = ["AGENTS.md", "TOOLS.md", "SOUL.md"]
+    soft_limit = 17000
+    hard_limit = 20000
+    total_limit = 60000
+    tracked_files = ["AGENTS.md", "SOUL.md", "TOOLS.md", "IDENTITY.md", "USER.md", "HEARTBEAT.md", "BOOTSTRAP.md", "MEMORY.md"]
     named_workspaces = ["workspace-claude", "workspace-main"]
 
     [heuristics]
@@ -35,6 +36,7 @@ Recognized environment variables:
   - ``BOOTSTRAP_DOCTOR_GATEWAY_MODEL``
   - ``BOOTSTRAP_DOCTOR_SOFT_LIMIT``
   - ``BOOTSTRAP_DOCTOR_HARD_LIMIT``
+  - ``BOOTSTRAP_DOCTOR_TOTAL_LIMIT``
 
 The remaining knobs (tracked_files, named_workspaces, heuristics, cache dir)
 are config-file-only in v1.
@@ -44,8 +46,7 @@ Validation rules (all raise :class:`ConfigError`):
   - ``workspace_dir`` must exist and be a directory.
   - ``cards_dir`` must exist and be a directory, unless
     ``allow_missing_cards=True``.
-  - ``0 < soft_limit < hard_limit < 12000`` (12k is the empirical ceiling;
-    ``hard_limit`` must leave headroom).
+  - ``0 < soft_limit < hard_limit`` and ``total_limit > 0``.
   - ``min_section_chars > 0`` and ``stale_days > 0``.
   - ``gateway_url`` must start with ``http://`` or ``https://``.
   - ``tracked_files`` must be non-empty; each entry ends in ``.md`` and
@@ -62,16 +63,10 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-# Bootstrap size thresholds are owned by brigade.budgets (the canonical source
-# of truth shared across the escoffier-labs tooling). They are re-exported here
-# under the local names this module already exposes so downstream references
-# stay unchanged. The .budgets module imports them from brigade when it is
-# installed and falls back to mirrored constants when it is not, which lets
-# bootstrap-doctor run standalone without brigade-cli.
 from bootstrap_doctor.budgets import (
     DEFAULT_HARD_LIMIT,
     DEFAULT_SOFT_LIMIT,
-    HARD_LIMIT_CEILING,
+    DEFAULT_TOTAL_LIMIT,
 )
 
 # Defaults -----------------------------------------------------------------
@@ -82,14 +77,24 @@ DEFAULT_GATEWAY_URL = "http://localhost:11434"
 DEFAULT_GATEWAY_MODEL = "deepseek-v4-pro:cloud"
 DEFAULT_TRACKED_FILES: list[str] = [
     "AGENTS.md",
-    "TOOLS.md",
     "SOUL.md",
-    "USER.md",
-    "SAFETY_RULES.md",
+    "TOOLS.md",
     "IDENTITY.md",
+    "USER.md",
     "HEARTBEAT.md",
+    "BOOTSTRAP.md",
     "MEMORY.md",
 ]
+DEFAULT_OPTIONAL_TRACKED_FILES = frozenset(
+    {
+        "SOUL.md",
+        "IDENTITY.md",
+        "USER.md",
+        "HEARTBEAT.md",
+        "BOOTSTRAP.md",
+        "MEMORY.md",
+    }
+)
 DEFAULT_NAMED_WORKSPACES: list[str] = []
 DEFAULT_MIN_SECTION_CHARS = 400
 DEFAULT_STALE_DAYS = 60
@@ -108,6 +113,7 @@ class Config:
     gateway_model: str
     soft_limit: int
     hard_limit: int
+    total_limit: int
     tracked_files: tuple[str, ...]
     named_workspaces: tuple[str, ...]
     min_section_chars: int
@@ -204,6 +210,7 @@ def _layer_values(file_data: dict[str, Any]) -> dict[str, Any]:
         "gateway_model": DEFAULT_GATEWAY_MODEL,
         "soft_limit": DEFAULT_SOFT_LIMIT,
         "hard_limit": DEFAULT_HARD_LIMIT,
+        "total_limit": DEFAULT_TOTAL_LIMIT,
         "tracked_files": list(DEFAULT_TRACKED_FILES),
         "named_workspaces": list(DEFAULT_NAMED_WORKSPACES),
         "min_section_chars": DEFAULT_MIN_SECTION_CHARS,
@@ -220,6 +227,7 @@ def _layer_values(file_data: dict[str, Any]) -> dict[str, Any]:
         "gateway_model",
         "soft_limit",
         "hard_limit",
+        "total_limit",
         "tracked_files",
         "named_workspaces",
     ):
@@ -255,6 +263,11 @@ def _layer_values(file_data: dict[str, Any]) -> dict[str, Any]:
     hard_env = os.environ.get("BOOTSTRAP_DOCTOR_HARD_LIMIT")
     if hard_env is not None:
         out["hard_limit"] = _coerce_int(hard_env, "BOOTSTRAP_DOCTOR_HARD_LIMIT")
+    total_env = os.environ.get("BOOTSTRAP_DOCTOR_TOTAL_LIMIT")
+    if total_env is not None:
+        out["total_limit"] = _coerce_int(
+            total_env, "BOOTSTRAP_DOCTOR_TOTAL_LIMIT"
+        )
 
     return out
 
@@ -284,9 +297,10 @@ def _validate_cards_dir(raw: Any, *, allow_missing: bool) -> Path:
     raise ConfigError(f"cards_dir does not exist: {path}")
 
 
-def _validate_limits(soft: Any, hard: Any) -> tuple[int, int]:
+def _validate_limits(soft: Any, hard: Any, total: Any) -> tuple[int, int, int]:
     soft_i = _coerce_int(soft, "soft_limit")
     hard_i = _coerce_int(hard, "hard_limit")
+    total_i = _coerce_int(total, "total_limit")
     if soft_i <= 0:
         raise ConfigError(f"soft_limit must be positive, got {soft_i}")
     if hard_i <= 0:
@@ -295,12 +309,9 @@ def _validate_limits(soft: Any, hard: Any) -> tuple[int, int]:
         raise ConfigError(
             f"soft_limit ({soft_i}) must be strictly less than hard_limit ({hard_i})"
         )
-    if hard_i >= HARD_LIMIT_CEILING:
-        raise ConfigError(
-            f"hard_limit ({hard_i}) must be below the {HARD_LIMIT_CEILING} "
-            f"char ceiling to leave headroom"
-        )
-    return soft_i, hard_i
+    if total_i <= 0:
+        raise ConfigError(f"total_limit must be positive, got {total_i}")
+    return soft_i, hard_i, total_i
 
 
 def _validate_gateway_url(raw: Any) -> str:
@@ -343,6 +354,8 @@ def _validate_tracked_files(raw: Any) -> tuple[str, ...]:
                 f"tracked_files entries must end in '.md', got {entry!r}"
             )
         out.append(entry)
+    if len(set(out)) != len(out):
+        raise ConfigError("tracked_files must not contain duplicate entries")
     return tuple(out)
 
 
@@ -359,6 +372,8 @@ def _validate_named_workspaces(raw: Any) -> tuple[str, ...]:
                 f"named_workspaces entries must not contain path separators, got {entry!r}"
             )
         out.append(entry)
+    if len(set(out)) != len(out):
+        raise ConfigError("named_workspaces must not contain duplicate entries")
     return tuple(out)
 
 
@@ -400,6 +415,7 @@ def resolve_config(
     gateway_model: str | None = None,
     soft_limit: int | None = None,
     hard_limit: int | None = None,
+    total_limit: int | None = None,
     allow_missing_cards: bool = False,
 ) -> Config:
     """Resolve config from defaults, file, env, and CLI flags.
@@ -424,13 +440,17 @@ def resolve_config(
         merged["soft_limit"] = soft_limit
     if hard_limit is not None:
         merged["hard_limit"] = hard_limit
+    if total_limit is not None:
+        merged["total_limit"] = total_limit
 
     # Validate and coerce.
     ws = _validate_workspace_dir(merged["workspace_dir"])
     cd = _validate_cards_dir(merged["cards_dir"], allow_missing=allow_missing_cards)
     gw_url = _validate_gateway_url(merged["gateway_url"])
     gw_model = _validate_gateway_model(merged["gateway_model"])
-    soft_i, hard_i = _validate_limits(merged["soft_limit"], merged["hard_limit"])
+    soft_i, hard_i, total_i = _validate_limits(
+        merged["soft_limit"], merged["hard_limit"], merged["total_limit"]
+    )
     tracked = _validate_tracked_files(merged["tracked_files"])
     named = _validate_named_workspaces(merged["named_workspaces"])
     min_chars = _validate_positive(merged["min_section_chars"], "min_section_chars")
@@ -444,6 +464,7 @@ def resolve_config(
         gateway_model=gw_model,
         soft_limit=soft_i,
         hard_limit=hard_i,
+        total_limit=total_i,
         tracked_files=tracked,
         named_workspaces=named,
         min_section_chars=min_chars,

@@ -2,15 +2,9 @@
 
 ## Context
 
-OpenClaw bootstrap files at `~/.openclaw/workspace/` are loaded into every session's prefix and have an empirical soft ceiling around 12,000 chars per file. Several files are already brushing it:
+OpenClaw loads a defined set of bootstrap files from each agent workspace. Commit `6deded6698e16f3cd7e8c65f94d22660df248aa5` raised its default per-file maximum from 12,000 to 20,000 characters on 2026-06-01. Current releases also apply a 60,000-character total budget, so several individually healthy files can still create aggregate pressure.
 
-- `AGENTS.md` - 11,805 chars (185 lines)
-- `TOOLS.md` - 11,589 chars (221 lines)
-- `SOUL.md` - 8,373 chars
-- `SAFETY_RULES.md` - 7,658 chars
-- `USER.md` - 7,229 chars
-
-The same files duplicate across `workspace-claude`, `workspace-main`, and `workspace-researcher`, multiplying the bloat surface. Each time a file crosses the limit, content gets truncated mid-session and OpenClaw silently loses prefix context, which is a hard-to-debug failure mode.
+Named workspaces can carry different bootstrap sets. Each workspace must be measured independently because per-file and total truncation are applied to that workspace's injected prefix.
 
 Today the operator manages this by hand: noticing a file is too big, picking a section, copying it into `memory/cards/`, leaving a link behind. That doesn't scale and gets skipped.
 
@@ -23,19 +17,20 @@ A Python CLI (pipx-installable, mirrors memory-doctor's project layout and comma
 ### Subcommands
 
 - **`bootstrap-doctor status`** - read-only. Reports each tracked file's char count, line count, and distance from soft/hard thresholds. No LLM calls.
-- **`bootstrap-doctor audit`** - read-only. Runs heuristic shortlist then LLM judge then prints per-section verdicts (`keep` / `move` / `unsure`) with the proposed card destination and breadcrumb text for each `move`. Verdicts cached by content hash so re-runs are cheap.
+- **`bootstrap-doctor audit`** - read-only. Runs heuristic shortlist then LLM judge, then prints per-section verdicts (`keep` / `move` / `unsure`) with reasons and topic. Verdicts are cached by content hash so re-runs are cheap.
 - **`bootstrap-doctor trim`** - applies the audit plan. Dry-run by default; `--apply` performs atomic writes. Always shows a git-style diff preview.
 
 ### Tracked files (default, overridable via config)
 
-`AGENTS.md`, `TOOLS.md`, `SOUL.md`, `USER.md`, `SAFETY_RULES.md`, `IDENTITY.md`, `HEARTBEAT.md`, `MEMORY.md`. `DREAMS.md` is intentionally skipped (not in bootstrap). Each named workspace (`workspace-claude`, `workspace-main`, `workspace-researcher`) is scanned as its own scope because the bootstraps diverge intentionally per agent.
+`AGENTS.md`, `SOUL.md`, `TOOLS.md`, `IDENTITY.md`, `USER.md`, `HEARTBEAT.md`, `BOOTSTRAP.md`, and `MEMORY.md`. `SOUL.md`, `IDENTITY.md`, `USER.md`, `HEARTBEAT.md`, `BOOTSTRAP.md`, and `MEMORY.md` are optional when absent. `SAFETY_RULES.md` and `DREAMS.md` are not recognized OpenClaw bootstrap files. Each configured named workspace is scanned as its own scope.
 
 ### Thresholds
 
-- `soft_limit` = 10,000 chars - warn in `status`
-- `hard_limit` = 11,500 chars - `audit` fires `move` verdicts aggressively
+- `soft_limit` = 17,000 chars - warn in `status`
+- `hard_limit` = 20,000 chars - force every reviewable H2/H3 section into `audit`
+- `total_limit` = 60,000 chars - report aggregate workspace pressure
 
-Both configurable. The 12k ceiling is empirical so we leave headroom.
+All three are configurable, and the per-file and total hard limits are independent. Total soft pressure begins at 85 percent of `total_limit`. Counts use the representation OpenClaw injects: ECMAScript trailing whitespace removed, measured as JavaScript UTF-16 code units. For standard sessions, aggregate pressure also includes OpenClaw's UTF-16 `[MISSING] Expected at: <absolute path>` marker for absent recognized defaults other than `MEMORY.md`. Content exactly at a hard boundary is retained and remains a soft warning; hard classification begins above the boundary.
 
 ### Decision pipeline
 
@@ -60,7 +55,7 @@ Both configurable. The 12k ceiling is empirical so we leave headroom.
 - Read-only verbs allow a missing `cards_dir`; mutating trim requires it to resolve through the normal apply path.
 - Refuses to run if `git status` in workspace is dirty (so any change is revertable), overridable with `--force`. If `cards_dir` is in a separate git repo, that repo is checked too.
 - Card writes happen before bootstrap rewrites. A card-write failure aborts before breadcrumbs are inserted.
-- LLM verdict cache stored at `~/.cache/bootstrap-doctor/verdicts.json`; clear with `--no-cache`.
+- LLM verdict cache stored at `~/.cache/bootstrap-doctor/verdicts.json`; bypass it for one run with `--no-cache`.
 
 ### Config
 
@@ -71,10 +66,11 @@ workspace_dir = "~/.openclaw/workspace"
 cards_dir = "~/.openclaw/workspace/memory/cards"
 gateway_url = "http://localhost:11434"
 gateway_model = "deepseek-v4-pro:cloud"
-soft_limit = 10000
-hard_limit = 11500
-tracked_files = ["AGENTS.md", "TOOLS.md", "SOUL.md", "USER.md",
-                 "SAFETY_RULES.md", "IDENTITY.md", "HEARTBEAT.md", "MEMORY.md"]
+soft_limit = 17000
+hard_limit = 20000
+total_limit = 60000
+tracked_files = ["AGENTS.md", "SOUL.md", "TOOLS.md", "IDENTITY.md",
+                 "USER.md", "HEARTBEAT.md", "BOOTSTRAP.md", "MEMORY.md"]
 named_workspaces = ["workspace-claude", "workspace-main", "workspace-researcher"]
 heuristics.min_section_chars = 400
 heuristics.stale_days = 60
@@ -116,8 +112,8 @@ This is a new standalone repo. Reference points:
 
 ## Verification
 
-1. **`bootstrap-doctor status`** matches reality - char counts equal `wc -c` on each tracked file plus or minus 0.
-2. **`bootstrap-doctor audit`** on the current live `TOOLS.md` (11,589 chars) flags at least 1 section as `move`. Sanity check that the LLM judge isn't dead.
+1. **`bootstrap-doctor status`** matches OpenClaw's trimmed UTF-16 character counts and reports each workspace's aggregate pressure.
+2. **`bootstrap-doctor audit`** returns 2 for missing or unreadable required files and for a hard-limit file without a reviewable H2/H3 section.
 3. **`bootstrap-doctor trim --apply`** on a *copied* workspace (e.g. `/tmp/bootstrap-doctor-e2e/`):
    - At least one section moved to a new card under `memory/cards/`.
    - Breadcrumb present in the original file at the same heading location.
@@ -136,3 +132,4 @@ This is a new standalone repo. Reference points:
 - TUI review mode.
 - Automatic restoration of breadcrumbed sections (one-way trim only).
 - Cron wrapper script. Operator can `crontab -e` manually; no installer.
+- Generated hook injection and harness-specific bootstrap selection. OpenClaw's native doctor is authoritative for those runtime details.

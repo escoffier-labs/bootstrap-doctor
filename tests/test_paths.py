@@ -13,8 +13,10 @@ from bootstrap_doctor.paths import (
     DEFAULT_HARD_LIMIT,
     DEFAULT_MIN_SECTION_CHARS,
     DEFAULT_NAMED_WORKSPACES,
+    DEFAULT_OPTIONAL_TRACKED_FILES,
     DEFAULT_SOFT_LIMIT,
     DEFAULT_STALE_DAYS,
+    DEFAULT_TOTAL_LIMIT,
     DEFAULT_TRACKED_FILES,
     DEFAULT_WORKSPACE_DIR,
     Config,
@@ -39,6 +41,7 @@ def _clear_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "BOOTSTRAP_DOCTOR_GATEWAY_MODEL",
         "BOOTSTRAP_DOCTOR_SOFT_LIMIT",
         "BOOTSTRAP_DOCTOR_HARD_LIMIT",
+        "BOOTSTRAP_DOCTOR_TOTAL_LIMIT",
     ):
         monkeypatch.delenv(key, raising=False)
 
@@ -65,14 +68,43 @@ def test_default_constants_match_spec():
     assert DEFAULT_CARDS_DIR == "~/.openclaw/workspace/memory/cards"
     assert DEFAULT_GATEWAY_URL == "http://localhost:11434"
     assert DEFAULT_GATEWAY_MODEL == "deepseek-v4-pro:cloud"
-    assert DEFAULT_SOFT_LIMIT == 10000
-    assert DEFAULT_HARD_LIMIT == 11500
+    assert DEFAULT_SOFT_LIMIT == 17000
+    assert DEFAULT_HARD_LIMIT == 20000
+    assert DEFAULT_TOTAL_LIMIT == 60000
     assert DEFAULT_MIN_SECTION_CHARS == 400
     assert DEFAULT_STALE_DAYS == 60
     assert DEFAULT_CACHE_DIR == "~/.cache/bootstrap-doctor"
-    assert "AGENTS.md" in DEFAULT_TRACKED_FILES
-    assert "MEMORY.md" in DEFAULT_TRACKED_FILES
+    assert DEFAULT_TRACKED_FILES == [
+        "AGENTS.md",
+        "SOUL.md",
+        "TOOLS.md",
+        "IDENTITY.md",
+        "USER.md",
+        "HEARTBEAT.md",
+        "BOOTSTRAP.md",
+        "MEMORY.md",
+    ]
     assert DEFAULT_NAMED_WORKSPACES == []
+    assert DEFAULT_OPTIONAL_TRACKED_FILES == frozenset(
+        {
+            "SOUL.md",
+            "IDENTITY.md",
+            "USER.md",
+            "HEARTBEAT.md",
+            "BOOTSTRAP.md",
+            "MEMORY.md",
+        }
+    )
+
+
+def test_schema_example_lists_every_default_tracked_file() -> None:
+    from bootstrap_doctor import paths as paths_mod
+
+    assert paths_mod.__doc__ is not None
+    expected = "tracked_files = [" + ", ".join(
+        f'"{name}"' for name in DEFAULT_TRACKED_FILES
+    ) + "]"
+    assert expected in paths_mod.__doc__
 
 
 def test_defaults_applied_when_no_config_no_env_no_flags(
@@ -90,6 +122,7 @@ def test_defaults_applied_when_no_config_no_env_no_flags(
     assert cfg.gateway_model == DEFAULT_GATEWAY_MODEL
     assert cfg.soft_limit == DEFAULT_SOFT_LIMIT
     assert cfg.hard_limit == DEFAULT_HARD_LIMIT
+    assert cfg.total_limit == DEFAULT_TOTAL_LIMIT
     assert cfg.tracked_files == tuple(DEFAULT_TRACKED_FILES)
     assert cfg.named_workspaces == tuple(DEFAULT_NAMED_WORKSPACES)
     assert cfg.min_section_chars == DEFAULT_MIN_SECTION_CHARS
@@ -115,6 +148,7 @@ gateway_url = "http://example.test:9000"
 gateway_model = "openai-codex/gpt-9"
 soft_limit = 5000
 hard_limit = 8000
+total_limit = 24000
 tracked_files = ["A.md", "B.md"]
 named_workspaces = ["workspace-claude"]
 
@@ -133,6 +167,7 @@ dir = "{tmp_path / "custom-cache"}"
     assert cfg.gateway_model == "openai-codex/gpt-9"
     assert cfg.soft_limit == 5000
     assert cfg.hard_limit == 8000
+    assert cfg.total_limit == 24000
     assert cfg.tracked_files == ("A.md", "B.md")
     assert cfg.named_workspaces == ("workspace-claude",)
     assert cfg.min_section_chars == 200
@@ -191,6 +226,7 @@ hard_limit = 8000
     monkeypatch.setenv("BOOTSTRAP_DOCTOR_GATEWAY_MODEL", "from-env/model")
     monkeypatch.setenv("BOOTSTRAP_DOCTOR_SOFT_LIMIT", "6000")
     monkeypatch.setenv("BOOTSTRAP_DOCTOR_HARD_LIMIT", "9000")
+    monkeypatch.setenv("BOOTSTRAP_DOCTOR_TOTAL_LIMIT", "27000")
 
     cfg = resolve_config()
     assert cfg.workspace_dir == other_workspace.resolve()
@@ -199,6 +235,7 @@ hard_limit = 8000
     assert cfg.gateway_model == "from-env/model"
     assert cfg.soft_limit == 6000
     assert cfg.hard_limit == 9000
+    assert cfg.total_limit == 27000
 
 
 def test_cli_flags_override_env_vars(
@@ -224,6 +261,7 @@ def test_cli_flags_override_env_vars(
         gateway_model="from-cli/model",
         soft_limit=7000,
         hard_limit=10000,
+        total_limit=30000,
     )
     assert cfg.workspace_dir == cli_workspace.resolve()
     assert cfg.cards_dir == cli_cards.resolve()
@@ -231,6 +269,7 @@ def test_cli_flags_override_env_vars(
     assert cfg.gateway_model == "from-cli/model"
     assert cfg.soft_limit == 7000
     assert cfg.hard_limit == 10000
+    assert cfg.total_limit == 30000
 
 
 def test_cli_flag_config_file_beats_env_config_file(
@@ -405,24 +444,33 @@ def test_soft_ge_hard_raises(
         )
 
 
-def test_hard_ge_12000_raises(
+def test_hard_may_equal_current_openclaw_default(
     workspace: Path, cards: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _clear_env(monkeypatch)
-    with pytest.raises(ConfigError):
-        resolve_config(
-            workspace_dir=str(workspace),
-            cards_dir=str(cards),
-            soft_limit=10000,
-            hard_limit=12000,
-        )
-    with pytest.raises(ConfigError):
-        resolve_config(
-            workspace_dir=str(workspace),
-            cards_dir=str(cards),
-            soft_limit=10000,
-            hard_limit=15000,
-        )
+    cfg = resolve_config(
+        workspace_dir=str(workspace),
+        cards_dir=str(cards),
+        soft_limit=17000,
+        hard_limit=20000,
+        total_limit=60000,
+    )
+    assert cfg.hard_limit == 20000
+
+
+def test_total_limit_is_independent_of_hard_limit(
+    workspace: Path, cards: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _clear_env(monkeypatch)
+    cfg = resolve_config(
+        workspace_dir=str(workspace),
+        cards_dir=str(cards),
+        soft_limit=100,
+        hard_limit=200,
+        total_limit=150,
+    )
+    assert cfg.hard_limit == 200
+    assert cfg.total_limit == 150
 
 
 def test_negative_or_zero_limits_raise(
@@ -623,6 +671,23 @@ tracked_files = ["{escaped}"]
         resolve_config(config_file=str(cfg_path))
 
 
+def test_duplicate_tracked_files_raise(
+    workspace: Path, cards: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _clear_env(monkeypatch)
+    cfg_path = tmp_path / "duplicates.toml"
+    _write_toml(
+        cfg_path,
+        f'''
+workspace_dir = "{workspace}"
+cards_dir = "{cards}"
+tracked_files = ["AGENTS.md", "AGENTS.md"]
+''',
+    )
+    with pytest.raises(ConfigError, match="duplicate"):
+        resolve_config(config_file=str(cfg_path))
+
+
 # Validation: named_workspaces -------------------------------------------
 
 
@@ -680,6 +745,23 @@ named_workspaces = ["{escaped}"]
 """,
     )
     with pytest.raises(ConfigError):
+        resolve_config(config_file=str(cfg_path))
+
+
+def test_duplicate_named_workspaces_raise(
+    workspace: Path, cards: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _clear_env(monkeypatch)
+    cfg_path = tmp_path / "duplicates.toml"
+    _write_toml(
+        cfg_path,
+        f'''
+workspace_dir = "{workspace}"
+cards_dir = "{cards}"
+named_workspaces = ["workspace-main", "workspace-main"]
+''',
+    )
+    with pytest.raises(ConfigError, match="duplicate"):
         resolve_config(config_file=str(cfg_path))
 
 
