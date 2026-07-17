@@ -9,7 +9,7 @@ description = "Audit and trim OpenClaw bootstrap files against current injection
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11"
-authors = [{ name = "Solomon Neas", email = "srneas@gmail.com" }]
+authors = [{ name = "Solomon Neas" }]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Environment :: Console",
