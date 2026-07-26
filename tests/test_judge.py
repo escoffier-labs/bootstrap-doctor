@@ -274,6 +274,26 @@ def test_unsure_response_recorded(cfg: Config) -> None:
     assert stats.failures == 0
 
 
+def test_request_reserves_output_budget_for_reasoning_models(cfg: Config) -> None:
+    """Regression for issue #11: reasoning-model gateways (the default
+    deepseek-v4-pro:cloud) count reasoning tokens plus message.content
+    against ``max_tokens``. A 400-token cap truncated the verdict JSON
+    (finish_reason=length, empty/partial body); live repros needed
+    reasoning of 1,558-1,890 chars before the JSON even started. The
+    request must reserve enough output budget for reasoning + the verdict
+    JSON, so a re-run does not silently degrade every verdict to unsure."""
+    cand = make_candidate()
+    calls: list[dict[str, Any]] = []
+
+    def fake_post(url: str, payload: dict[str, Any]) -> FakeResponse:
+        calls.append(payload)
+        return FakeResponse(200, _ok_keep())
+
+    judge_all([cand], cfg, http_post=fake_post)
+    assert calls, "gateway was never called"
+    assert calls[0]["max_tokens"] >= 1200
+
+
 # ---------------------------------------------------------------------------
 # HTTP path: failure modes
 # ---------------------------------------------------------------------------

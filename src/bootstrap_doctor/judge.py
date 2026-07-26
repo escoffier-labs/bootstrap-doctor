@@ -301,7 +301,14 @@ def _build_payload(candidate: Candidate, cfg: Config) -> tuple[dict[str, Any], i
         ],
         "response_format": {"type": "json_object"},
         "temperature": 0.0,
-        "max_tokens": 400,
+        # Reasoning-model gateways (the default deepseek-v4-pro:cloud) count
+        # reasoning tokens plus message.content against max_tokens. At 400 the
+        # reasoning alone (1,558-1,890 chars observed live) exhausted the cap
+        # and the JSON verdict was truncated (finish_reason=length), degrading
+        # every candidate to an unsure judge_error. 1200 clears reasoning
+        # (2,097-3,433 chars) plus the small verdict JSON with headroom. See
+        # issue #11.
+        "max_tokens": 1200,
     }
     return payload, len(system) + len(user)
 
