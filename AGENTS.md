@@ -13,8 +13,8 @@ Ruff and mypy are configured in pyproject but not installed in the system Python
 ## Project Shape
 - Python 3.11+ CLI that audits OpenClaw bootstrap markdown files against the current per-file and total injection budgets, then relocates oversized sections to `memory/cards/` with one-line breadcrumbs left in the original.
 - Hatchling src layout. Package is `src/bootstrap_doctor/`, console script `bootstrap-doctor` maps to `bootstrap_doctor.cli:main`.
-- Three subcommands: `status` (read-only report), `audit` (heuristics + LLM verdicts, read-only), `trim` (dry-run by default, writes only with `--apply`).
-- Pipeline modules: `paths.py` (config layering), `parsing.py` (H2/H3 section splitter), `heuristics.py` (shortlist), `judge.py` (gateway client + verdict cache), `trim.py`, `status.py`, `safety.py` (atomic writes, git-clean gate, slug traversal guards).
+- Four subcommands: `status` (read-only report), `runtime` (read-only; verifies the injected prompt against trajectory evidence), `audit` (heuristics + LLM verdicts, read-only), `trim` (dry-run by default, writes only with `--apply`).
+- Pipeline modules: `paths.py` (config layering), `parsing.py` (H2/H3 section splitter), `heuristics.py` (shortlist), `judge.py` (gateway client + verdict cache), `trim.py`, `status.py`, `runtime.py` (trajectory-based injection check), `safety.py` (atomic writes, git-clean gate, slug traversal guards).
 - Standalone defaults mirror current OpenClaw: 17,000 soft, 20,000 hard, and 60,000 total characters. Brigade can enforce a separate ingestion policy, but installing it must not change bootstrap-doctor's runtime classification.
 - Config layering order: built-in defaults, then `~/.config/bootstrap-doctor/config.toml`, then `BOOTSTRAP_DOCTOR_*` env vars, then CLI flags.
 

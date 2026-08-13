@@ -69,6 +69,33 @@ def build_parser() -> argparse.ArgumentParser:
         "--json", action="store_true", help="Emit JSON instead of human table"
     )
 
+    p_runtime = sub.add_parser(
+        "runtime",
+        help="Verify what OpenClaw actually injected, not just what is on disk",
+    )
+    _add_common(p_runtime)
+    p_runtime.add_argument(
+        "--agent", default=None, help="OpenClaw agent id (default main)"
+    )
+    p_runtime.add_argument(
+        "--openclaw-home",
+        default=None,
+        help="OpenClaw state dir holding agents/<id>/sessions (default ~/.openclaw)",
+    )
+    p_runtime.add_argument(
+        "--openclaw-config",
+        default=None,
+        help="Path to openclaw.json (default ~/.openclaw/openclaw.json)",
+    )
+    p_runtime.add_argument(
+        "--session-key",
+        default=None,
+        help="Only consider sessions whose key contains this substring",
+    )
+    p_runtime.add_argument(
+        "--json", action="store_true", help="Emit JSON instead of human table"
+    )
+
     p_audit = sub.add_parser(
         "audit", help="Heuristic shortlist + LLM judge (no mutations)"
     )
@@ -202,6 +229,43 @@ def run_status(args: argparse.Namespace) -> int:
     except ConfigError as exc:
         return _handle_config_error(args, exc)
     return status_mod.run(cfg, as_json=args.json)
+
+
+# ---------------------------------------------------------------------------
+# Verb: runtime
+# ---------------------------------------------------------------------------
+
+
+def run_runtime(args: argparse.Namespace) -> int:
+    from pathlib import Path
+
+    from bootstrap_doctor import runtime as runtime_mod
+    from bootstrap_doctor.paths import DEFAULT_OPTIONAL_TRACKED_FILES, ConfigError
+
+    try:
+        cfg = _resolve_cfg(args, allow_missing_cards=True)
+    except ConfigError as exc:
+        return _handle_config_error(args, exc)
+
+    home = Path(
+        args.openclaw_home or Path("~/.openclaw")
+    ).expanduser()
+    config_path = Path(
+        args.openclaw_config or (home / "openclaw.json")
+    ).expanduser()
+    try:
+        return runtime_mod.run(
+            cfg,
+            openclaw_home=home,
+            openclaw_config=config_path,
+            agent_id=args.agent or runtime_mod.DEFAULT_AGENT_ID,
+            optional_files=DEFAULT_OPTIONAL_TRACKED_FILES,
+            session_filter=args.session_key,
+            as_json=args.json,
+        )
+    except runtime_mod.RuntimeError_ as exc:
+        _print_error(str(exc))
+        return 2
 
 
 # ---------------------------------------------------------------------------
@@ -566,6 +630,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.verb == "status":
             return run_status(args)
+        if args.verb == "runtime":
+            return run_runtime(args)
         if args.verb == "audit":
             return run_audit(args)
         if args.verb == "trim":

@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Added
+- `runtime` verb: verifies what OpenClaw actually injected by reading the newest `context.compiled` trajectory event, instead of inferring it from on-disk file sizes. Classifies every tracked file as present, truncated, or absent, resolves the effective `bootstrapMaxChars` / `bootstrapTotalMaxChars` from `openclaw.json`, and reports drift when those disagree with this tool's configured limits. Cron and heartbeat sessions are excluded because they carry no bootstrap files by design, and the skipped count is always printed. Exit codes match the existing contract: 0 clean, 1 truncation or cap drift, 2 a tracked file never reached the model.
 - Project governance: `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`, and issue / pull-request templates.
 - Per-workspace total pressure reporting against OpenClaw's 60,000-character default.
 - Audit preflight failures for missing or unreadable required bootstrap files.

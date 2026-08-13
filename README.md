@@ -61,6 +61,41 @@ workspace  /home/you/.openclaw/workspace
 
 Use `--json` for machine-readable output with per-file limits, the 60,000-character workspace limit, per-workspace totals, and one row per tracked file. Character counts use OpenClaw's injected representation: trailing whitespace is removed and JavaScript UTF-16 code units are counted.
 
+### runtime
+
+`status` measures files on disk. That is a proxy, and the proxy can be green while the model receives nothing. `runtime` reads OpenClaw's `context.compiled` trajectory event, which records the exact system prompt that was sent, and checks the tracked files against it.
+
+```
+$ bootstrap-doctor runtime
+bootstrap-doctor runtime  (agent=main)
+
+effective caps from /home/you/.openclaw/openclaw.json
+  per-file  40000 (configured)
+  total     120000 (configured)
+  DRIFT total budget: OpenClaw will apply 120000, bootstrap-doctor is configured for 60000
+
+newest compiled prompt  2026-08-13T12:13:26.294Z
+  trace   /home/you/.openclaw/agents/main/sessions/c263c3f5.trajectory.jsonl
+  session agent:main:main
+  model   gpt-5.6-luna
+  chars   20000
+  skipped 6067 cron/heartbeat compile(s), which carry no bootstrap files by design
+
+  file             disk  injected  status
+  AGENTS.md       15280         -  ABSENT
+  SOUL.md          5098       807  TRUNCATED
+  TOOLS.md        12896     14550  ok
+
+summary: 5 tracked file(s) missing from the prompt, 1 truncated, 2 cap drift note(s)
+  AGENTS.md ... never reached the model. Raise agents.defaults.bootstrapTotalMaxChars or shrink earlier files.
+```
+
+Exit codes follow the usual contract: `0` everything arrived, `1` something was truncated or the caps drifted, `2` a tracked file never reached the model.
+
+Two notes on reading the output. `optional` excuses a file that is not on disk, never one that is on disk and failed to arrive. And when a prompt exceeds the 32,768-character trajectory field limit, OpenClaw records only its size, so the verb reports the size and says plainly that per-file presence could not be verified rather than guessing.
+
+Scope with `--agent`, `--session-key`, `--openclaw-home`, and `--openclaw-config`. Cron and heartbeat sessions are excluded by default and the skipped count is always printed.
+
 ### audit
 
 ```
