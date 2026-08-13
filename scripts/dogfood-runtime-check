@@ -1,0 +1,87 @@
+#!/bin/bash
+# Dogfood the `runtime` verb two ways:
+#   1. Replay the 2026-08-12 outage trace (20,000-char prompt) and assert the
+#      verb catches AGENTS.md/USER.md/MEMORY.md never reaching the model.
+#   2. Run against the live post-fix OpenClaw state and assert it comes back clean.
+set -uo pipefail
+cd "$(dirname "$0")/.." || exit 2
+export PYTHONPATH=src
+BD="python3 -m bootstrap_doctor.cli"
+# Point these at a real OpenClaw workspace and a trajectory file that contains a
+# string (not size-only) systemPrompt. Both are machine-local, so they are env
+# overrides rather than committed absolute paths.
+WS="${BD_DOGFOOD_WORKSPACE:-$HOME/.openclaw/workspace}"
+OUTAGE_TRACE="${BD_DOGFOOD_TRACE:-}"
+fail=0
+
+if [ -z "$OUTAGE_TRACE" ] || [ ! -f "$OUTAGE_TRACE" ]; then
+  echo "SKIP replay: set BD_DOGFOOD_TRACE to a trajectory file with a string systemPrompt"
+  skip_replay=1
+fi
+
+echo "=== 1/2 replay the outage trace ==="
+if [ "${skip_replay:-0}" = "1" ]; then
+  echo "(skipped)"
+else
+REPLAY=$(mktemp -d)
+mkdir -p "$REPLAY/agents/main/sessions"
+python3 - "$OUTAGE_TRACE" "$REPLAY/agents/main/sessions/outage.trajectory.jsonl" <<'PY'
+import json
+import sys
+
+src, dst = sys.argv[1], sys.argv[2]
+with open(src, encoding="utf-8") as handle:
+    for line in handle:
+        if '"context.compiled"' not in line:
+            continue
+        event = json.loads(line)
+        if event.get("type") != "context.compiled":
+            continue
+        prompt = event.get("data", {}).get("systemPrompt")
+        if not isinstance(prompt, str):
+            continue
+        with open(dst, "w", encoding="utf-8") as out:
+            out.write(json.dumps(event) + "\n")
+        print(f"replayed compiled prompt: {len(prompt)} chars at {event.get('ts')}")
+        break
+    else:
+        print("FAIL could not find a string systemPrompt in the outage trace")
+        raise SystemExit(1)
+PY
+[ $? -eq 0 ] || exit 2
+
+$BD runtime --workspace-dir "$WS" --openclaw-home "$REPLAY" \
+  --openclaw-config /nonexistent.json > "$REPLAY/out.txt" 2>&1
+rc=$?
+cat "$REPLAY/out.txt"
+echo "exit=$rc"
+[ "$rc" -eq 2 ] && echo "PASS outage replay exits 2" || { echo "FAIL expected exit 2"; fail=1; }
+for f in AGENTS.md USER.md MEMORY.md; do
+  if grep -qE "^  $f +[0-9]+ +- +ABSENT$" "$REPLAY/out.txt"; then
+    echo "PASS $f detected as absent from the injected prompt"
+  else
+    echo "FAIL $f not reported absent"; fail=1
+  fi
+done
+grep -qE "^  TOOLS.md .* (ok|TRUNCATED)$" "$REPLAY/out.txt" \
+  && echo "PASS TOOLS.md was present in the prompt" \
+  || { echo "FAIL TOOLS.md should have been present"; fail=1; }
+rm -rf "$REPLAY"
+fi
+
+echo
+echo "=== 2/2 live post-fix state ==="
+$BD runtime --workspace-dir "$WS" > /tmp/bd-runtime-live.txt 2>&1
+rc=$?
+cat /tmp/bd-runtime-live.txt
+echo "exit=$rc"
+grep -q "tracked file(s) missing from the prompt" /tmp/bd-runtime-live.txt \
+  && echo "PASS live run produced a summary" \
+  || { echo "FAIL no summary line"; fail=1; }
+grep -qE "^summary: 0 tracked" /tmp/bd-runtime-live.txt \
+  && echo "PASS live state has no missing required files" \
+  || { echo "NOTE live state reports missing files, see table above"; }
+
+echo
+[ "$fail" -eq 0 ] && echo "DOGFOOD PASS" || echo "DOGFOOD FAILURES"
+exit $fail
