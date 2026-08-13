@@ -28,6 +28,12 @@ OpenClaw's documented default (60,000) is exactly the number this tool already
 assumed. Only check 1 catches it. Check 2 exists so the reported numbers stop
 drifting away from the live config.
 
+A caveat the verb enforces rather than assumes: some harness runtimes deliver
+bootstrap outside the injected system prompt. The Codex runtime hands AGENTS.md
+to Codex as native project-doc ``<INSTRUCTIONS>`` and mirrors the rest into
+``world_state``, so its ``context.compiled`` prompt proves nothing about those
+files. Sessions on such a runtime are reported as unverifiable, not as failures.
+
 No LLM calls, no mutations, stdlib only.
 """
 from __future__ import annotations
@@ -55,6 +61,16 @@ DEFAULT_AGENT_ID = "main"
 # look like "agent:main:cron:<uuid>:run:<uuid>". Excluded by default; the count
 # of what was skipped is always reported so the filter is never silent.
 DEFAULT_LIGHTWEIGHT_SESSION_KINDS = ("cron", "heartbeat")
+
+# Harness runtimes that deliver workspace bootstrap through their own channels
+# instead of OpenClaw's injected system prompt. The Codex runtime hands AGENTS.md
+# to Codex as native project-doc `<INSTRUCTIONS>` and mirrors the whole bootstrap
+# set into `world_state`, so its `context.compiled` systemPrompt holds only the
+# OpenClaw-side preamble. Judging those files against that field reports every
+# one of them absent when they all arrived. Verified 2026-08-13 by reading a
+# codex-home rollout: AGENTS.md, SOUL.md, USER.md, TOOLS.md, and MEMORY.md were
+# all present as instructions, not tool output.
+FOREIGN_BOOTSTRAP_RUNTIMES = ("codex",)
 
 # The trajectory writer stores strings verbatim up to this length and replaces
 # anything longer with {"truncated": true, "originalChars": N}. Mirrored from
@@ -108,6 +124,7 @@ class RuntimeReport:
     prompt_text_available: bool
     session_key: str | None = None
     skipped_sessions: int = 0
+    foreign_runtime: str | None = None
     files: list[InjectedFile] = field(default_factory=list)
     caps: EffectiveCaps | None = None
     cap_drift: list[str] = field(default_factory=list)
@@ -184,6 +201,38 @@ def resolve_effective_caps(
         agent_id=agent_id,
         source=source,
     )
+
+
+def resolve_model_runtime(
+    cfg: dict[str, Any], model_id: str | None, agent_id: str
+) -> str | None:
+    """Return the agentRuntime id declared for ``model_id``, if any.
+
+    Trajectory events carry a bare model id ("gpt-5.6-sol") while config keys
+    are provider-qualified ("openai/gpt-5.6-sol"), so match on the suffix. A
+    per-agent ``models`` block wins over ``agents.defaults.models``.
+    """
+    if not model_id:
+        return None
+    agents = cfg.get("agents")
+    agents = agents if isinstance(agents, dict) else {}
+    defaults = agents.get("defaults")
+    scopes: list[dict[str, Any]] = []
+    entry = _agent_entry(cfg, agent_id)
+    for scope in (entry.get("models"), (defaults or {}).get("models")):
+        if isinstance(scope, dict):
+            scopes.append(scope)
+    for scope in scopes:
+        for key, value in scope.items():
+            if not isinstance(value, dict):
+                continue
+            if key == model_id or key.rsplit("/", 1)[-1] == model_id:
+                runtime = value.get("agentRuntime")
+                if isinstance(runtime, dict):
+                    rid = runtime.get("id")
+                    if isinstance(rid, str) and rid.strip():
+                        return rid.strip()
+    return None
 
 
 def cap_drift(caps: EffectiveCaps, cfg: Config) -> list[str]:
@@ -394,6 +443,19 @@ def build_report(
         )
     event, trace_path, skipped = found
     prompt_chars, prompt_text = prompt_size_and_text(event)
+
+    # A foreign harness delivers bootstrap outside the injected system prompt,
+    # so the prompt text cannot answer the question. Say so instead of calling
+    # every file absent.
+    foreign: str | None = None
+    if openclaw_config.exists():
+        runtime_id = resolve_model_runtime(
+            load_openclaw_config(openclaw_config), event.get("modelId"), agent_id
+        )
+        if runtime_id in FOREIGN_BOOTSTRAP_RUNTIMES:
+            foreign = runtime_id
+            prompt_text = None
+
     return RuntimeReport(
         agent_id=agent_id,
         trace_path=trace_path,
@@ -403,6 +465,7 @@ def build_report(
         prompt_text_available=prompt_text is not None,
         session_key=event.get("sessionKey"),
         skipped_sessions=skipped,
+        foreign_runtime=foreign,
         files=analyze_files(prompt_text, cfg, cfg.workspace_dir, optional_files),
         caps=caps,
         cap_drift=drift,
@@ -457,7 +520,13 @@ def render_text(report: RuntimeReport) -> str:
             f"  skipped {report.skipped_sessions} cron/heartbeat compile(s), "
             "which carry no bootstrap files by design"
         )
-    if not report.prompt_text_available:
+    if report.foreign_runtime:
+        lines.append(
+            f"  note    the {report.foreign_runtime} runtime delivers workspace "
+            "bootstrap through its own instruction channels, not this system "
+            "prompt, so per-file presence cannot be verified from this trace"
+        )
+    elif not report.prompt_text_available:
         lines.append(
             f"  note    prompt exceeded the {TRAJECTORY_STRING_MAX_CHARS}-char "
             "trajectory field limit, so only its size was recorded; "
@@ -503,6 +572,7 @@ def render_json(report: RuntimeReport) -> str:
         "prompt_text_available": report.prompt_text_available,
         "session_key": report.session_key,
         "skipped_sessions": report.skipped_sessions,
+        "foreign_runtime": report.foreign_runtime,
         "cap_drift": report.cap_drift,
         "caps": None,
         "files": [asdict(r) for r in report.files],

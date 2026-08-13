@@ -45,7 +45,12 @@ def _prompt(files: dict[str, str], ws: Path) -> str:
 
 
 def _write_trace(
-    tmp_path: Path, agent: str, prompt, *, ts: str = "2026-08-12T21:45:46.291Z"
+    tmp_path: Path,
+    agent: str,
+    prompt,
+    *,
+    ts: str = "2026-08-12T21:45:46.291Z",
+    model: str = "grok-4.6",
 ) -> Path:
     sessions = tmp_path / "agents" / agent / "sessions"
     sessions.mkdir(parents=True, exist_ok=True)
@@ -53,7 +58,7 @@ def _write_trace(
     event = {
         "type": "context.compiled",
         "ts": ts,
-        "modelId": "grok-4.6",
+        "modelId": model,
         "data": {"systemPrompt": prompt},
     }
     with path.open("a", encoding="utf-8") as fh:
@@ -470,3 +475,87 @@ def test_default_optional_set_is_reusable():
     """The CLI passes paths.DEFAULT_OPTIONAL_TRACKED_FILES; keep it a frozenset."""
     assert isinstance(DEFAULT_OPTIONAL_TRACKED_FILES, frozenset)
     assert "AGENTS.md" not in DEFAULT_OPTIONAL_TRACKED_FILES
+
+
+# Foreign harness runtimes ------------------------------------------------
+
+
+def _codex_config() -> dict:
+    return {
+        "agents": {
+            "defaults": {
+                "models": {
+                    "openai/gpt-5.6-sol": {"agentRuntime": {"id": "codex"}},
+                    "xai/grok-4.6": {"alias": "grok"},
+                }
+            }
+        }
+    }
+
+
+@pytest.mark.parametrize(
+    ("model_id", "expected"),
+    [
+        ("gpt-5.6-sol", "codex"),          # bare id from the trajectory event
+        ("openai/gpt-5.6-sol", "codex"),   # fully qualified
+        ("grok-4.6", None),                # openclaw runtime, no agentRuntime
+        ("unknown-model", None),
+        (None, None),
+    ],
+)
+def test_resolve_model_runtime(model_id, expected):
+    assert runtime.resolve_model_runtime(_codex_config(), model_id, "main") == expected
+
+
+def test_codex_runtime_does_not_report_files_absent(tmp_path):
+    """Regression: codex hands bootstrap to Codex as native <INSTRUCTIONS>.
+
+    Its context.compiled systemPrompt carries only the OpenClaw preamble, so
+    judging tracked files against it reported every one absent when they had
+    all arrived. Verified against a real codex-home rollout on 2026-08-13.
+    """
+    ws = _write_workspace(tmp_path, {"AGENTS.md": 14000, "TOOLS.md": 12000})
+    # A codex prompt with no bootstrap headings at all.
+    _write_trace(
+        tmp_path,
+        "main",
+        "OpenClaw plugin-injected system context only.",
+        model="gpt-5.6-sol",
+    )
+    oc = tmp_path / "openclaw.json"
+    oc.write_text(json.dumps(_codex_config()), encoding="utf-8")
+    cfg = _cfg(tmp_path, ws)
+
+    report = runtime.build_report(
+        cfg,
+        openclaw_home=tmp_path,
+        openclaw_config=oc,
+        agent_id="main",
+        optional_files=frozenset(),
+    )
+    assert report.foreign_runtime == "codex"
+    assert all(r.severity != runtime.SEV_ABSENT for r in report.files)
+    assert runtime.exit_code(report) == 0
+    assert "own instruction channels" in runtime.render_text(report)
+
+
+def test_openclaw_runtime_still_reports_absent(tmp_path):
+    """The real outage shape must still fail: openclaw runtime, file missing."""
+    ws = _write_workspace(tmp_path, {"AGENTS.md": 14000, "TOOLS.md": 12000})
+    prompt = _prompt({"TOOLS.md": "x" * 12000}, ws)
+    _write_trace(tmp_path, "main", prompt)
+    oc = tmp_path / "openclaw.json"
+    oc.write_text(json.dumps(_codex_config()), encoding="utf-8")
+    cfg = _cfg(tmp_path, ws)
+
+    report = runtime.build_report(
+        cfg,
+        openclaw_home=tmp_path,
+        openclaw_config=oc,
+        agent_id="main",
+        optional_files=frozenset(),
+    )
+    # _write_trace stamps modelId grok-4.6, which has no agentRuntime.
+    assert report.foreign_runtime is None
+    assert {r.name: r.severity for r in report.files}["AGENTS.md"] == runtime.SEV_ABSENT
+    assert runtime.exit_code(report) == 2

@@ -76,8 +76,8 @@ effective caps from /home/you/.openclaw/openclaw.json
 
 newest compiled prompt  2026-08-13T12:13:26.294Z
   trace   /home/you/.openclaw/agents/main/sessions/c263c3f5.trajectory.jsonl
-  session agent:main:main
-  model   gpt-5.6-luna
+  session agent:main:telegram:direct:123
+  model   grok-4.6
   chars   20000
   skipped 6067 cron/heartbeat compile(s), which carry no bootstrap files by design
 
@@ -86,13 +86,15 @@ newest compiled prompt  2026-08-13T12:13:26.294Z
   SOUL.md          5098       807  TRUNCATED
   TOOLS.md        12896     14550  ok
 
-summary: 5 tracked file(s) missing from the prompt, 1 truncated, 2 cap drift note(s)
+summary: 2 tracked file(s) missing from the prompt, 1 truncated, 2 cap drift note(s)
   AGENTS.md ... never reached the model. Raise agents.defaults.bootstrapTotalMaxChars or shrink earlier files.
 ```
 
 Exit codes follow the usual contract: `0` everything arrived, `1` something was truncated or the caps drifted, `2` a tracked file never reached the model.
 
-Two notes on reading the output. `optional` excuses a file that is not on disk, never one that is on disk and failed to arrive. And when a prompt exceeds the 32,768-character trajectory field limit, OpenClaw records only its size, so the verb reports the size and says plainly that per-file presence could not be verified rather than guessing.
+If the session ran on a harness runtime that delivers bootstrap through its own channels, the Codex runtime being the case that exists today, the verb says so and reports `UNKNOWN` rather than guessing. Codex receives AGENTS.md as native project-doc `<INSTRUCTIONS>` and mirrors the bootstrap set into `world_state`, so its `context.compiled` system prompt holds only the OpenClaw-side preamble and is not evidence either way.
+
+Two more notes on reading the output. `optional` excuses a file that is not on disk, never one that is on disk and failed to arrive. And when a prompt exceeds the 32,768-character trajectory field limit, OpenClaw records only its size, so the verb reports the size and says plainly that per-file presence could not be verified rather than guessing.
 
 Scope with `--agent`, `--session-key`, `--openclaw-home`, and `--openclaw-config`. Cron and heartbeat sessions are excluded by default and the skipped count is always printed.
 
