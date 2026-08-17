@@ -48,12 +48,12 @@ assert finding_ids(report) == {
 - Modify: `CHANGELOG.md`
 - Modify: `docs/bootstrap-doctor-design.md`
 
-- [ ] Write failing CLI tests that assert `lint --json`, `--openclaw-home`, and `--openclaw-config` parse and dispatch to `lint.run`.
-- [ ] Run RED: `brigade work verify run --target . --command "python3 -m pytest tests/test_cli.py -q" --capture taste`. Expect argparse to reject `lint`.
-- [ ] Add the parser and `run_lint` delegate. Do not add repair flags.
-- [ ] Document the seven stable finding IDs, JSON shape, exit codes, bounded discovery, and read-only behavior.
-- [ ] Run GREEN: `brigade work verify run --target . --command "python3 -m pytest tests/test_cli.py tests/test_lint.py -q" --capture taste`.
-- [ ] Run full verification: `./scripts/verify`. Expect status completed and pytest exit 0.
-- [ ] Commit: `git add src/bootstrap_doctor/cli.py tests/test_cli.py README.md CHANGELOG.md docs/bootstrap-doctor-design.md docs/plans/2026-08-17-lifecycle-lint.md && git commit -m "feat: expose bootstrap lifecycle lint"`
+- [x] Write failing CLI tests that assert `lint --json`, `--openclaw-home`, and `--openclaw-config` parse and dispatch to `lint.run`.
+- [x] Run RED: `brigade work verify run --target . --command "python3 -m pytest tests/test_cli.py -q" --capture taste`. Expect argparse to reject `lint`.
+- [x] Add the parser and `run_lint` delegate. Do not add repair flags.
+- [x] Document the seven stable finding IDs, JSON shape, exit codes, bounded discovery, and read-only behavior.
+- [x] Run GREEN: `brigade work verify run --target . --command "python3 -m pytest tests/test_cli.py tests/test_lint.py -q" --capture taste`.
+- [x] Run full verification: `./scripts/verify`. Expect status completed and pytest exit 0.
+- [x] Commit: `git add src/bootstrap_doctor/cli.py tests/test_cli.py README.md CHANGELOG.md docs/bootstrap-doctor-design.md docs/plans/2026-08-17-lifecycle-lint.md && git commit -m "feat: expose bootstrap lifecycle lint"`
 
 Growth trigger: add repair behavior only after a separate approved design defines recoverable archive semantics and confirmation boundaries.
