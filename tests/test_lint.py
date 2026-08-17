@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from bootstrap_doctor.lint import (
+    LintError,
     LintFinding,
     LintReport,
     collect_findings,
@@ -530,6 +531,208 @@ def test_per_agent_workspace_wins_over_defaults(tmp_path: Path) -> None:
     }
     resolved = resolve_agent_workspaces(config, config_path)
     assert resolved["main"] == other.resolve()
+
+
+def test_defaults_only_config_resolves_implicit_main_to_state_workspace(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "openclaw-home"
+    config_path = tmp_path / "elsewhere" / "openclaw.json"
+    config_path.parent.mkdir()
+    config: dict = {"agents": {"defaults": {}}}
+    resolved = resolve_agent_workspaces(config, config_path, openclaw_home=home)
+    assert resolved == {"main": (home / "workspace").resolve()}
+
+
+def test_defaults_only_config_uses_defaults_workspace_for_implicit_main(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "openclaw-home"
+    primary = tmp_path / "named-primary"
+    config_path = tmp_path / "openclaw.json"
+    config = {"agents": {"defaults": {"workspace": str(primary)}}}
+    resolved = resolve_agent_workspaces(config, config_path, openclaw_home=home)
+    assert resolved == {"main": primary.resolve()}
+
+
+def test_non_main_default_agent_inherits_defaults_workspace(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "openclaw-home"
+    primary = tmp_path / "named-primary"
+    config_path = tmp_path / "openclaw.json"
+    config = {
+        "agents": {
+            "defaults": {"workspace": str(primary)},
+            "list": [
+                {"id": "coder", "default": True},
+                {"id": "helper"},
+            ],
+        }
+    }
+    resolved = resolve_agent_workspaces(config, config_path, openclaw_home=home)
+    assert resolved["coder"] == primary.resolve()
+    assert resolved["helper"] == (primary / "helper").resolve()
+
+
+def test_first_listed_agent_inherits_defaults_workspace_as_default(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "openclaw-home"
+    primary = tmp_path / "named-primary"
+    config_path = tmp_path / "openclaw.json"
+    config = {
+        "agents": {
+            "defaults": {"workspace": str(primary)},
+            "list": [{"id": "coder"}, {"id": "helper"}],
+        }
+    }
+    resolved = resolve_agent_workspaces(config, config_path, openclaw_home=home)
+    assert resolved["coder"] == primary.resolve()
+    assert resolved["helper"] == (primary / "helper").resolve()
+
+
+def test_non_default_agent_without_defaults_workspace_uses_state_home(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "openclaw-home"
+    config_path = tmp_path / "elsewhere" / "openclaw.json"
+    config_path.parent.mkdir()
+    config = {"agents": {"list": [{"id": "main"}, {"id": "helper"}]}}
+    resolved = resolve_agent_workspaces(config, config_path, openclaw_home=home)
+    assert resolved["main"] == (home / "workspace").resolve()
+    assert resolved["helper"] == (home / "workspace-helper").resolve()
+
+
+def test_explicit_workspace_wins_for_default_and_non_default(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "openclaw-home"
+    primary = tmp_path / "named-primary"
+    coder_ws = tmp_path / "coder-ws"
+    helper_ws = tmp_path / "helper-ws"
+    config_path = tmp_path / "openclaw.json"
+    config = {
+        "agents": {
+            "defaults": {"workspace": str(primary)},
+            "list": [
+                {"id": "coder", "default": True, "workspace": str(coder_ws)},
+                {"id": "helper", "workspace": str(helper_ws)},
+            ],
+        }
+    }
+    resolved = resolve_agent_workspaces(config, config_path, openclaw_home=home)
+    assert resolved["coder"] == coder_ws.resolve()
+    assert resolved["helper"] == helper_ws.resolve()
+
+
+def test_orphan_sibling_roots_at_later_explicit_default_workspace(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "openclaw-home"
+    home.mkdir()
+    default_ws = tmp_path / "elsewhere" / "coder-ws"
+    orphan = default_ws.parent / "workspace-ghost"
+    config_path = home / "openclaw.json"
+    config = {
+        "agents": {
+            "list": [
+                {"id": "helper"},
+                {
+                    "id": "coder",
+                    "default": True,
+                    "workspace": str(default_ws),
+                },
+            ]
+        }
+    }
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+    _seed_workspace(home / "workspace-helper", setup_completed=True)
+    _seed_workspace(default_ws, setup_completed=True)
+    _seed_workspace(orphan, bootstrap=True, identity=None, user=None)
+    report = collect_findings(
+        load_openclaw_config(config_path),
+        config_path,
+        openclaw_home=home,
+    )
+    orphans = [f for f in report.findings if f.check_id == "orphan-workspace"]
+    assert [f.path for f in orphans] == [orphan / "BOOTSTRAP.md"]
+
+
+# Structural validation ---------------------------------------------------
+
+
+INVALID_AGENT_SHAPES = (
+    {"agents": "nope"},
+    {"agents": {"defaults": []}},
+    {"agents": {"list": {}}},
+    {"agents": {"list": ["main"]}},
+    {"agents": {"list": [{}]}},
+    {"agents": {"list": [{"id": ""}]}},
+    {"agents": {"list": [{"id": 1}]}},
+    {"agents": {"defaults": {"workspace": 123}}},
+    {"agents": {"defaults": {"workspace": ""}}},
+    {"agents": {"list": [{"id": "main", "workspace": ""}]}},
+    {"agents": {"list": [{"id": "main", "workspace": 1}]}},
+    {"agents": {"list": [{"id": "main", "default": "yes"}]}},
+    {"agents": {"defaults": {"subagents": []}}},
+    {"agents": {"list": [{"id": "main", "subagents": "nope"}]}},
+    {"agents": {"defaults": {"subagents": {"allowAgents": "main"}}}},
+    {"agents": {"list": [{"id": "main", "subagents": {"allowAgents": [""]}}]}},
+    {"agents": {"list": [{"id": "main", "subagents": {"allowAgents": ["   "]}}]}},
+    {"agents": {"list": [{"id": "main", "subagents": {"allowAgents": [1]}}]}},
+)
+
+VALID_ABSENT_AGENT_BLOCKS = (
+    {},
+    {"agents": {}},
+    {"agents": {"defaults": {}}},
+    {"agents": {"list": []}},
+    {"agents": {"defaults": {}, "list": []}},
+    {"agents": {"list": [{"id": "main"}]}},
+    {"agents": {"defaults": {"workspace": "ws"}, "list": [{"id": "main"}]}},
+    {
+        "agents": {
+            "defaults": {"subagents": {"allowAgents": ["*"]}},
+            "list": [{"id": "main", "default": False}],
+        }
+    },
+)
+
+
+@pytest.mark.parametrize("payload", INVALID_AGENT_SHAPES)
+def test_invalid_agent_shapes_raise_lint_error(
+    tmp_path: Path, payload: dict, capsys: pytest.CaptureFixture[str]
+) -> None:
+    path = tmp_path / "openclaw.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(LintError):
+        load_openclaw_config(path)
+    with pytest.raises(LintError):
+        collect_findings(payload, path)
+    assert run(_cfg(tmp_path), openclaw_config=path) == 2
+    captured = capsys.readouterr()
+    assert captured.out or captured.err
+
+
+@pytest.mark.parametrize("payload", VALID_ABSENT_AGENT_BLOCKS)
+def test_valid_absent_optional_agent_blocks_are_accepted(
+    tmp_path: Path, payload: dict
+) -> None:
+    path = tmp_path / "openclaw.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    config = load_openclaw_config(path)
+    report = collect_findings(config, path, openclaw_home=tmp_path / "openclaw-home")
+    assert isinstance(report, LintReport)
+
+
+def test_collect_findings_does_not_hide_malformed_agents(tmp_path: Path) -> None:
+    path = tmp_path / "openclaw.json"
+    payload = {"agents": {"list": [{"workspace": "/tmp/ws"}]}}
+    with pytest.raises(LintError):
+        collect_findings(payload, path)
+    with pytest.raises(LintError):
+        resolve_agent_workspaces(payload, path)
 
 
 # Ordering, rendering, exits ----------------------------------------------

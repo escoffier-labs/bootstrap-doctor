@@ -257,10 +257,15 @@ def test_lint_dispatches_to_lint_run(
     seen: dict[str, Any] = {}
 
     def fake_run(
-        cfg: Config, *, openclaw_config: Path, as_json: bool = False
+        cfg: Config,
+        *,
+        openclaw_config: Path,
+        openclaw_home: Path | None = None,
+        as_json: bool = False,
     ) -> int:
         seen["cfg"] = cfg
         seen["openclaw_config"] = openclaw_config
+        seen["openclaw_home"] = openclaw_home
         seen["as_json"] = as_json
         return 0
 
@@ -304,6 +309,68 @@ def test_lint_dispatches_to_lint_run(
     code = cli_mod.main(["lint", "--config", str(cfg_path)])
     assert code == 0
     assert seen["openclaw_config"] == tmp_path / ".openclaw" / "openclaw.json"
+
+
+def test_lint_passes_resolved_openclaw_home_to_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace, cards = _mk_workspace(tmp_path)
+    (workspace / "AGENTS.md").write_text("x" * 10)
+    cfg_path = _write_config(tmp_path, workspace=workspace, cards=cards)
+    home = tmp_path / "openclaw-home"
+    home.mkdir()
+    explicit_config = tmp_path / "elsewhere" / "openclaw.json"
+    explicit_config.parent.mkdir()
+    explicit_config.write_text("{}", encoding="utf-8")
+
+    seen: dict[str, Any] = {}
+
+    def fake_run(
+        cfg: Config,
+        *,
+        openclaw_config: Path,
+        openclaw_home: Path | None = None,
+        as_json: bool = False,
+    ) -> int:
+        seen["openclaw_config"] = openclaw_config
+        seen["openclaw_home"] = openclaw_home
+        seen["as_json"] = as_json
+        return 0
+
+    from bootstrap_doctor import lint as lint_mod
+
+    monkeypatch.setattr(lint_mod, "run", fake_run)
+
+    code = cli_mod.main(
+        [
+            "lint",
+            "--config",
+            str(cfg_path),
+            "--openclaw-home",
+            str(home),
+            "--openclaw-config",
+            str(explicit_config),
+        ]
+    )
+    assert code == 0
+    assert seen["openclaw_home"] == home
+    assert seen["openclaw_config"] == explicit_config
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    seen.clear()
+    code = cli_mod.main(
+        [
+            "lint",
+            "--config",
+            str(cfg_path),
+            "--openclaw-config",
+            str(explicit_config),
+        ]
+    )
+    assert code == 0
+    assert seen["openclaw_home"] == tmp_path / ".openclaw"
+    assert seen["openclaw_config"] == explicit_config
+    assert seen["openclaw_home"] != explicit_config.parent
 
 
 def test_audit_dispatches_through_judge(

@@ -308,10 +308,13 @@ def run_lint(args: argparse.Namespace) -> int:
         return _handle_config_error(args, exc)
 
     home = Path(args.openclaw_home or Path("~/.openclaw")).expanduser()
-    config_path = Path(
-        args.openclaw_config or (home / "openclaw.json")
-    ).expanduser()
-    return lint_mod.run(cfg, openclaw_config=config_path, as_json=args.json)
+    config_path = Path(args.openclaw_config or (home / "openclaw.json")).expanduser()
+    return lint_mod.run(
+        cfg,
+        openclaw_config=config_path,
+        openclaw_home=home,
+        as_json=args.json,
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -93,7 +93,63 @@ def load_openclaw_config(path: Path) -> dict[str, Any]:
         raise LintError(f"invalid JSON in {path}: {exc}") from exc
     if not isinstance(parsed, dict):
         raise LintError(f"{path} is not a JSON object")
+    _validate_agents_config(parsed)
     return parsed
+
+
+def _require_object(value: Any, name: str) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise LintError(f"{name} must be an object")
+    return value
+
+
+def _require_nonempty_string(value: Any, name: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise LintError(f"{name} must be a non-empty string")
+    return value
+
+
+def _validate_allow_agents(value: Any, name: str) -> None:
+    if not isinstance(value, list):
+        raise LintError(f"{name} must be a list of non-empty strings")
+    for index, item in enumerate(value):
+        if not isinstance(item, str) or not item.strip():
+            raise LintError(f"{name}[{index}] must be a non-empty string")
+
+
+def _validate_subagents(value: Any, name: str) -> None:
+    block = _require_object(value, name)
+    if "allowAgents" in block:
+        _validate_allow_agents(block["allowAgents"], f"{name}.allowAgents")
+
+
+def _validate_workspace_field(block: dict[str, Any], name: str) -> None:
+    if "workspace" in block:
+        _require_nonempty_string(block["workspace"], f"{name}.workspace")
+
+
+def _validate_agents_config(config: dict[str, Any]) -> None:
+    if "agents" not in config:
+        return
+    agents = _require_object(config["agents"], "agents")
+    if "defaults" in agents:
+        defaults = _require_object(agents["defaults"], "agents.defaults")
+        _validate_workspace_field(defaults, "agents.defaults")
+        if "subagents" in defaults:
+            _validate_subagents(defaults["subagents"], "agents.defaults.subagents")
+    if "list" not in agents:
+        return
+    entries = agents["list"]
+    if not isinstance(entries, list):
+        raise LintError("agents.list must be a list")
+    for index, entry in enumerate(entries):
+        item = _require_object(entry, f"agents.list[{index}]")
+        _require_nonempty_string(item.get("id"), f"agents.list[{index}].id")
+        _validate_workspace_field(item, f"agents.list[{index}]")
+        if "default" in item and not isinstance(item["default"], bool):
+            raise LintError(f"agents.list[{index}].default must be a boolean")
+        if "subagents" in item:
+            _validate_subagents(item["subagents"], f"agents.list[{index}].subagents")
 
 
 def _agents_block(config: dict[str, Any]) -> dict[str, Any]:
@@ -112,9 +168,28 @@ def _agent_entries(config: dict[str, Any]) -> list[dict[str, Any]]:
         return []
     out: list[dict[str, Any]] = []
     for entry in entries:
-        if isinstance(entry, dict) and isinstance(entry.get("id"), str) and entry["id"]:
+        if (
+            isinstance(entry, dict)
+            and isinstance(entry.get("id"), str)
+            and entry["id"].strip()
+        ):
             out.append(entry)
     return out
+
+
+def _default_agent_id(entries: Sequence[dict[str, Any]]) -> str:
+    if not entries:
+        return DEFAULT_AGENT_ID
+    for entry in entries:
+        if entry.get("default") is True:
+            return entry["id"]
+    return entries[0]["id"]
+
+
+def _state_home(openclaw_home: Path | None) -> Path:
+    if openclaw_home is not None:
+        return Path(openclaw_home).expanduser().resolve()
+    return (Path.home() / ".openclaw").resolve()
 
 
 def _resolve_user_path(raw: str, config_path: Path) -> Path:
@@ -132,23 +207,36 @@ def _primary_workspace(config: dict[str, Any], config_path: Path) -> Path | None
 
 
 def resolve_agent_workspaces(
-    config: dict[str, Any], config_path: Path
+    config: dict[str, Any],
+    config_path: Path,
+    *,
+    openclaw_home: Path | None = None,
 ) -> dict[str, Path]:
     """Map each configured agent id to its resolved workspace path."""
+    _validate_agents_config(config)
     primary = _primary_workspace(config, config_path)
+    state_home = _state_home(openclaw_home)
+    entries = _agent_entries(config)
+    default_id = _default_agent_id(entries)
+    if not entries:
+        entries = [{"id": DEFAULT_AGENT_ID}]
+        default_id = DEFAULT_AGENT_ID
     resolved: dict[str, Path] = {}
-    for entry in _agent_entries(config):
+    for entry in entries:
         agent_id = entry["id"]
         raw = entry.get("workspace")
         if isinstance(raw, str) and raw.strip():
             resolved[agent_id] = _resolve_user_path(raw.strip(), config_path)
             continue
-        if agent_id == DEFAULT_AGENT_ID:
-            if primary is not None:
-                resolved[agent_id] = primary
+        if agent_id == default_id:
+            resolved[agent_id] = (
+                primary if primary is not None else (state_home / "workspace")
+            )
             continue
         if primary is not None:
             resolved[agent_id] = (primary / agent_id).resolve()
+        else:
+            resolved[agent_id] = (state_home / f"workspace-{agent_id}").resolve()
     return resolved
 
 
@@ -340,22 +428,29 @@ def collect_findings(
     config_path: Path,
     *,
     tracked_files: Sequence[str] | None = None,
+    openclaw_home: Path | None = None,
 ) -> LintReport:
     """Collect lifecycle findings for one OpenClaw config."""
+    _validate_agents_config(config)
     tracked = tuple(tracked_files) if tracked_files is not None else RECOGNIZED_FILES
-    workspaces = resolve_agent_workspaces(config, config_path)
+    workspaces = resolve_agent_workspaces(
+        config, config_path, openclaw_home=openclaw_home
+    )
+    entries = _agent_entries(config)
     primary = _primary_workspace(config, config_path)
     if primary is None:
-        primary = next(iter(workspaces.values()), config_path.parent / "workspace")
+        primary = workspaces.get(
+            _default_agent_id(entries),
+            _state_home(openclaw_home) / "workspace",
+        )
     configured = {path.resolve() for path in workspaces.values()}
     candidates = discover_workspace_candidates(primary, configured=configured)
     findings: list[LintFinding] = []
-
-    known_ids = {entry["id"] for entry in _agent_entries(config)}
+    known_ids = {entry["id"] for entry in entries} or {DEFAULT_AGENT_ID}
     dangling_seen: set[str] = set()
     for owner, block in (
         (None, _defaults_block(config)),
-        *((entry["id"], entry) for entry in _agent_entries(config)),
+        *((entry["id"], entry) for entry in entries),
     ):
         for name in _allow_agents(block):
             if name == "*" or name in known_ids or name in dangling_seen:
@@ -555,17 +650,21 @@ def run(
     cfg: Config,
     *,
     openclaw_config: Path,
+    openclaw_home: Path | None = None,
     as_json: bool = False,
 ) -> int:
     """Print a lifecycle report and return the contract exit code."""
     try:
         config = load_openclaw_config(openclaw_config)
+        report = collect_findings(
+            config,
+            openclaw_config,
+            tracked_files=cfg.tracked_files,
+            openclaw_home=openclaw_home,
+        )
     except LintError as exc:
         print(str(exc), file=sys.stderr)
         return 2
-    report = collect_findings(
-        config, openclaw_config, tracked_files=cfg.tracked_files
-    )
     print(render_json(report) if as_json else render_text(report))
     if report.error_count:
         return 2
