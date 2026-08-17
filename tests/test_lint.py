@@ -799,6 +799,59 @@ def test_normalize_all_invalid_agent_id_falls_back_to_main(tmp_path: Path) -> No
     assert resolved == {"main": primary.resolve()}
 
 
+def test_normalize_unicode_casefold_outliers_match_javascript_ascii_regex(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "openclaw-home"
+    config_path = tmp_path / "openclaw.json"
+    config = {
+        "agents": {
+            "list": [
+                {"id": "main"},
+                {"id": "İ"},
+                {"id": "ı"},
+                {"id": "ſ"},
+                {"id": "K"},
+            ]
+        }
+    }
+    resolved = resolve_agent_workspaces(config, config_path, openclaw_home=home)
+    assert set(resolved) == {"main", "i", "k"}
+    assert resolved["i"] == (home / "workspace-i").resolve()
+    assert resolved["k"] == (home / "workspace-k").resolve()
+
+
+def test_normalize_unicode_collision_keeps_first_ascii_equivalent(
+    tmp_path: Path,
+) -> None:
+    first_ws = tmp_path / "first-ws"
+    second_ws = tmp_path / "second-ws"
+    config = {
+        "agents": {
+            "list": [
+                {"id": "i", "workspace": str(first_ws)},
+                {"id": "İ", "workspace": str(second_ws)},
+            ]
+        }
+    }
+    resolved = resolve_agent_workspaces(
+        config, tmp_path / "openclaw.json", openclaw_home=tmp_path / "home"
+    )
+    assert resolved == {"i": first_ws.resolve()}
+
+
+def test_normalize_unicode_allow_agents_matches_runtime_ids(tmp_path: Path) -> None:
+    _home, config_path, primary = _openclaw_home(
+        tmp_path,
+        agents=[{"id": "i"}, {"id": "main"}],
+        allow_agents=["İ", "ı", "ſ"],
+    )
+    _seed_workspace(primary, setup_completed=True)
+    report = collect_findings(load_openclaw_config(config_path), config_path)
+    dangling = [f for f in report.findings if f.check_id == "dangling-agent-reference"]
+    assert dangling == []
+
+
 def test_normalize_finding_agent_values(tmp_path: Path) -> None:
     first_ws = tmp_path / "first-ws"
     second_ws = tmp_path / "second-ws"

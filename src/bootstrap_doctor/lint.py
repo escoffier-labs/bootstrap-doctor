@@ -48,7 +48,9 @@ IGNORED_COMPONENTS = frozenset(
 
 _FIELD_RE = re.compile(r"^- \*\*(?P<field>[^*]+):\*\*[ \t]*(?P<value>.*)$")
 _ITALIC_HINT_RE = re.compile(r"^_\(.*\)_$")
-_VALID_AGENT_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$", re.IGNORECASE)
+_VALID_AGENT_ID_RE = re.compile(
+    r"^[a-z0-9][a-z0-9_-]{0,63}$", re.ASCII | re.IGNORECASE
+)
 _INVALID_AGENT_ID_CHARS_RE = re.compile(r"[^a-z0-9_-]+")
 _LEADING_HYPHEN_RE = re.compile(r"^-+")
 _TRAILING_HYPHEN_RE = re.compile(r"-+$")
