@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Added
+- `lint` verb: read-only deterministic check of OpenClaw workspace lifecycle and context drift. Reports seven stable finding IDs (`bootstrap-after-setup`, `orphan-workspace`, `configured-placeholder`, `memory-contradicts-fresh`, `inactive-context-content`, `dangling-agent-reference`, `duplicate-context`). Discovery is bounded to the primary workspace, configured named workspaces, sibling `workspace-*` directories, and immediate child workspaces. JSON output is a stable object with `ok`, `findings`, `error_count`, and `warning_count`. Exit codes: 0 clean, 1 warning-only, 2 any error or unreadable/invalid required input. No writes, no repairs, no OpenClaw subprocess.
 - `runtime` verb: verifies what OpenClaw actually injected by reading the newest `context.compiled` trajectory event, instead of inferring it from on-disk file sizes. Classifies every tracked file as present, truncated, or absent, resolves the effective `bootstrapMaxChars` / `bootstrapTotalMaxChars` from `openclaw.json`, and reports drift when those disagree with this tool's configured limits. Cron and heartbeat sessions are excluded because they carry no bootstrap files by design, and the skipped count is always printed. Exit codes match the existing contract: 0 clean, 1 truncation or cap drift, 2 a tracked file never reached the model.
 - Project governance: `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`, and issue / pull-request templates.
 - Per-workspace total pressure reporting against OpenClaw's 60,000-character default.

@@ -3,21 +3,27 @@
 Subcommands:
 
   * ``status``  - read-only size/limit report (delegates to ``status.run``).
+  * ``runtime`` - read-only; verifies the injected prompt against
+    trajectory evidence (delegates to ``runtime.run``).
+  * ``lint``    - read-only deterministic lifecycle/context report
+    (delegates to ``lint.run``).
   * ``audit``   - parse + heuristics shortlist + LLM judge, render verdicts.
   * ``trim``    - same flow as audit, then build + (optionally) apply a plan.
 
 Exit codes:
 
   * ``0`` - success / nothing actionable.
-  * ``1`` - soft warning. Any soft-band file in status, any move/unsure
-    verdict in audit, or a dry-run trim plan with actions.
+  * ``1`` - soft warning. Any soft-band file in status, any lint warning,
+    any move/unsure verdict in audit, or a dry-run trim plan with actions.
   * ``2`` - hard error. Bad config, dirty workspace blocking ``--apply``,
-    gateway-side failures during audit, hard-limit violations in status.
+    gateway-side failures during audit, hard-limit violations in status,
+    or a lint error / unreadable OpenClaw config.
   * ``3`` - unexpected exception. Falls through the broad catch at the
     top level. Set ``BOOTSTRAP_DOCTOR_TRACE=1`` to see the traceback.
 
 Every mutating verb is dry-run by default. Only ``trim --apply`` writes
 files, and only after a git-clean preflight (unless ``--force``).
+``lint`` never writes files and never shells out.
 """
 from __future__ import annotations
 
@@ -51,7 +57,7 @@ def _add_common(p: argparse.ArgumentParser) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    """Build the top-level argparse parser with all three subcommands."""
+    """Build the top-level argparse parser with all five subcommands."""
     root = argparse.ArgumentParser(
         prog="bootstrap-doctor",
         description="Audit and trim OpenClaw bootstrap files.",
@@ -94,6 +100,25 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_runtime.add_argument(
         "--json", action="store_true", help="Emit JSON instead of human table"
+    )
+
+    p_lint = sub.add_parser(
+        "lint",
+        help="Read-only lifecycle and context drift report",
+    )
+    _add_common(p_lint)
+    p_lint.add_argument(
+        "--openclaw-home",
+        default=None,
+        help="OpenClaw state dir holding openclaw.json (default ~/.openclaw)",
+    )
+    p_lint.add_argument(
+        "--openclaw-config",
+        default=None,
+        help="Path to openclaw.json (default <openclaw-home>/openclaw.json)",
+    )
+    p_lint.add_argument(
+        "--json", action="store_true", help="Emit JSON instead of human text"
     )
 
     p_audit = sub.add_parser(
@@ -266,6 +291,27 @@ def run_runtime(args: argparse.Namespace) -> int:
     except runtime_mod.RuntimeError_ as exc:
         _print_error(str(exc))
         return 2
+
+
+# ---------------------------------------------------------------------------
+# Verb: lint
+# ---------------------------------------------------------------------------
+
+
+def run_lint(args: argparse.Namespace) -> int:
+    from bootstrap_doctor import lint as lint_mod
+    from bootstrap_doctor.paths import ConfigError
+
+    try:
+        cfg = _resolve_cfg(args, allow_missing_cards=True)
+    except ConfigError as exc:
+        return _handle_config_error(args, exc)
+
+    home = Path(args.openclaw_home or Path("~/.openclaw")).expanduser()
+    config_path = Path(
+        args.openclaw_config or (home / "openclaw.json")
+    ).expanduser()
+    return lint_mod.run(cfg, openclaw_config=config_path, as_json=args.json)
 
 
 # ---------------------------------------------------------------------------
@@ -632,6 +678,8 @@ def main(argv: list[str] | None = None) -> int:
             return run_status(args)
         if args.verb == "runtime":
             return run_runtime(args)
+        if args.verb == "lint":
+            return run_lint(args)
         if args.verb == "audit":
             return run_audit(args)
         if args.verb == "trim":

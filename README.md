@@ -30,6 +30,7 @@
 ```bash
 pipx install git+https://github.com/escoffier-labs/bootstrap-doctor
 bootstrap-doctor status
+bootstrap-doctor lint
 bootstrap-doctor audit
 bootstrap-doctor trim
 ```
@@ -39,6 +40,7 @@ bootstrap-doctor trim
 | | Job | What you get |
 |---|---|---|
 | **Measure** | Every bootstrap surface | Size vs soft and hard limits |
+| **Lint** | Stale lifecycle and leftover context | Seven stable finding IDs; read-only |
 | **Audit** | What should move out | Heuristic shortlist; optional LLM judge |
 | **Trim** | Reference cards, not silent cut | Dry-run plan first; --apply after review |
 
@@ -97,6 +99,39 @@ If the session ran on a harness runtime that delivers bootstrap through its own 
 Two more notes on reading the output. `optional` excuses a file that is not on disk, never one that is on disk and failed to arrive. And when a prompt exceeds the 32,768-character trajectory field limit, OpenClaw records only its size, so the verb reports the size and says plainly that per-file presence could not be verified rather than guessing.
 
 Scope with `--agent`, `--session-key`, `--openclaw-home`, and `--openclaw-config`. Cron and heartbeat sessions are excluded by default and the skipped count is always printed.
+
+### lint
+
+`status` measures size. `lint` checks whether a workspace still looks like first-run setup after it has already been used, and whether leftover workspaces or duplicated bootstrap files are still sitting around.
+
+```
+$ bootstrap-doctor lint
+bootstrap-doctor lint
+error  bootstrap-after-setup  /home/you/.openclaw/workspace/BOOTSTRAP.md  agent=main
+  BOOTSTRAP.md remains after setupCompletedAt
+warning  configured-placeholder  /home/you/.openclaw/workspace/IDENTITY.md  agent=main
+  IDENTITY.md retains stock or blank placeholder fields
+
+summary: 1 error(s), 1 warning(s)
+```
+
+Read-only. No LLM, no writes, no OpenClaw subprocess. Discovery stays bounded: the primary workspace, configured named workspaces, sibling `workspace-*` directories, and immediate child workspaces. Backup, docs, worktree, dependency, cache, and Git paths are ignored.
+
+Stable finding IDs:
+
+- `bootstrap-after-setup` - error when `BOOTSTRAP.md` remains after `setupCompletedAt`.
+- `orphan-workspace` - warning when an unconfigured workspace retains `BOOTSTRAP.md`.
+- `configured-placeholder` - warning when a configured agent retains stock or blank `IDENTITY.md` or `USER.md` fields.
+- `memory-contradicts-fresh` - error when `BOOTSTRAP.md` claims first-run state but the workspace already contains substantive memory.
+- `inactive-context-content` - warning when a substantive recognized bootstrap file is present but excluded from the configured tracked-file set.
+- `dangling-agent-reference` - error when `subagents.allowAgents` names an agent absent from `agents.list`; `*` remains valid.
+- `duplicate-context` - warning for exact normalized duplicate bootstrap content of at least 200 characters across configured workspaces.
+
+`--json` prints a stable object with `ok`, `findings`, `error_count`, and `warning_count`. Each finding has `check_id`, `severity`, `message`, and `path`, plus `agent_id` when one agent owns it.
+
+Exit codes: `0` clean, `1` warning-only findings, `2` any error or unreadable/invalid `openclaw.json`.
+
+`--openclaw-home` defaults to `~/.openclaw` and supplies the default config path (`~/.openclaw/openclaw.json`). `--openclaw-config` overrides that file explicitly.
 
 ### audit
 
