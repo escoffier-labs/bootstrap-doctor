@@ -20,7 +20,7 @@ Agentic workers must execute each checkbox in order, keep the plan updated, and 
 - Create: `src/bootstrap_doctor/lint.py`
 - Create: `tests/test_lint.py`
 
-- [ ] Write failing tests that build a temporary OpenClaw home and assert exact findings for:
+- [x] Write failing tests that build a temporary OpenClaw home and assert exact findings for:
 
 ```python
 assert finding_ids(report) == {
@@ -31,13 +31,13 @@ assert finding_ids(report) == {
 }
 ```
 
-- [ ] Write failing tests proving an unconfigured sibling or immediate-child workspace is `orphan-workspace`, while `.bootstrap-backups`, `docs`, `node_modules`, worktrees, and deeper fixture directories are ignored.
-- [ ] Write failing tests proving substantive excluded bootstrap content produces `inactive-context-content`, exact normalized content of at least 200 characters across configured workspaces produces `duplicate-context`, wildcard `allowAgents = ["*"]` is valid, and findings sort by severity, ID, then path.
-- [ ] Run RED: `brigade work verify run --target . --command "python3 -m pytest tests/test_lint.py -q" --capture taste`. Expect import or attribute failure because `bootstrap_doctor.lint` does not exist.
-- [ ] Implement the minimum detector with `LintFinding`, `LintReport`, `load_openclaw_config`, `resolve_agent_workspaces`, `discover_workspace_candidates`, `collect_findings`, `render_json`, `render_text`, and `run`.
-- [ ] Keep discovery bounded to the primary workspace, configured named workspaces, sibling `workspace-*` directories, and immediate child directories with workspace marker files. Never recurse through arbitrary workspace content.
-- [ ] Run GREEN with the same Brigade command. Expect all `tests/test_lint.py` tests to pass.
-- [ ] Commit: `git add src/bootstrap_doctor/lint.py tests/test_lint.py && git commit -m "feat: detect stale bootstrap lifecycle state"`
+- [x] Write failing tests proving an unconfigured sibling or immediate-child workspace is `orphan-workspace`, while `.bootstrap-backups`, `docs`, `node_modules`, worktrees, and deeper fixture directories are ignored.
+- [x] Write failing tests proving substantive excluded bootstrap content produces `inactive-context-content`, exact normalized content of at least 200 characters across configured workspaces produces `duplicate-context`, wildcard `allowAgents = ["*"]` is valid, and findings sort by severity, ID, then path.
+- [x] Run RED: `brigade work verify run --target . --command "python3 -m pytest tests/test_lint.py -q" --capture taste`. Expect import or attribute failure because `bootstrap_doctor.lint` does not exist.
+- [x] Implement the minimum detector with `LintFinding`, `LintReport`, `load_openclaw_config`, `resolve_agent_workspaces`, `discover_workspace_candidates`, `collect_findings`, `render_json`, `render_text`, and `run`.
+- [x] Keep discovery bounded to the primary workspace, configured named workspaces, sibling `workspace-*` directories, and immediate child directories with workspace marker files. Never recurse through arbitrary workspace content.
+- [x] Run GREEN with the same Brigade command. Expect all `tests/test_lint.py` tests to pass.
+- [x] Commit: `git add src/bootstrap_doctor/lint.py tests/test_lint.py && git commit -m "feat: detect stale bootstrap lifecycle state"`
 
 ### Task 2: CLI and public contract
 
