@@ -283,7 +283,10 @@ def _is_placeholder_value(value: str) -> bool:
 
 def _has_placeholder_fields(text: str, required: Sequence[str]) -> bool:
     values = _field_values(text)
-    return any(_is_placeholder_value(values.get(field, "")) for field in required)
+    return any(
+        field in values and _is_placeholder_value(values[field])
+        for field in required
+    )
 
 
 def _allow_agents(block: dict[str, Any]) -> list[str]:

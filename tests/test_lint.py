@@ -73,6 +73,18 @@ FILLED_USER = """# USER.md - About Your Human
 - **Notes:** Prefers short answers.
 """
 
+CUSTOM_IDENTITY = """# IDENTITY.md
+
+Lakehouse is a research assistant with a calm, precise voice.
+This workspace chose that identity without the stock bold field list.
+"""
+
+CUSTOM_USER = """# USER.md
+
+Ada Example prefers Ada, works from America/Chicago, and wants short answers.
+This file never used the stock bold field template.
+"""
+
 BOOTSTRAP_BODY = "# BOOTSTRAP.md - Hello, World\n\nThere is no memory yet.\n"
 SUBSTANTIVE_MEMORY = (
     "# MEMORY.md\n\n"
@@ -410,6 +422,56 @@ def test_blank_user_fields_are_configured_placeholder(tmp_path: Path) -> None:
     ]
     assert [f.path for f in placeholders] == [primary / "USER.md"]
     assert placeholders[0].agent_id == "main"
+
+
+def test_untouched_stock_identity_is_configured_placeholder(tmp_path: Path) -> None:
+    _home, config_path, primary = _openclaw_home(
+        tmp_path, agents=[{"id": "main"}]
+    )
+    _seed_workspace(
+        primary,
+        setup_completed=True,
+        identity=STOCK_IDENTITY,
+        user=FILLED_USER,
+    )
+    report = collect_findings(load_openclaw_config(config_path), config_path)
+    placeholders = [
+        f for f in report.findings if f.check_id == "configured-placeholder"
+    ]
+    assert [f.path for f in placeholders] == [primary / "IDENTITY.md"]
+    assert placeholders[0].agent_id == "main"
+
+
+def test_custom_format_identity_is_not_configured_placeholder(
+    tmp_path: Path,
+) -> None:
+    _home, config_path, primary = _openclaw_home(
+        tmp_path, agents=[{"id": "main"}]
+    )
+    _seed_workspace(
+        primary,
+        setup_completed=True,
+        identity=CUSTOM_IDENTITY,
+        user=FILLED_USER,
+    )
+    report = collect_findings(load_openclaw_config(config_path), config_path)
+    assert "configured-placeholder" not in _finding_ids(report)
+    assert report.findings == ()
+
+
+def test_custom_format_user_is_not_configured_placeholder(tmp_path: Path) -> None:
+    _home, config_path, primary = _openclaw_home(
+        tmp_path, agents=[{"id": "main"}]
+    )
+    _seed_workspace(
+        primary,
+        setup_completed=True,
+        identity=FILLED_IDENTITY,
+        user=CUSTOM_USER,
+    )
+    report = collect_findings(load_openclaw_config(config_path), config_path)
+    assert "configured-placeholder" not in _finding_ids(report)
+    assert report.findings == ()
 
 
 def test_memory_card_proves_prior_use(tmp_path: Path) -> None:
