@@ -17,8 +17,25 @@ A Python CLI (pipx-installable, mirrors memory-doctor's project layout and comma
 ### Subcommands
 
 - **`bootstrap-doctor status`** - read-only. Reports each tracked file's char count, line count, and distance from soft/hard thresholds. No LLM calls.
+- **`bootstrap-doctor lint`** - read-only and deterministic. Compares configured OpenClaw agents, workspace setup state, and bootstrap content to report lifecycle and context drift. No LLM calls and no repairs.
 - **`bootstrap-doctor audit`** - read-only. Runs heuristic shortlist then LLM judge, then prints per-section verdicts (`keep` / `move` / `unsure`) with reasons and topic. Verdicts are cached by content hash so re-runs are cheap.
 - **`bootstrap-doctor trim`** - applies the audit plan. Dry-run by default; `--apply` performs atomic writes. Always shows a git-style diff preview.
+
+### Lifecycle lint contract
+
+`bootstrap-doctor lint` reads `openclaw.json`, resolves every configured agent workspace, and inspects only the primary workspace, configured named workspaces, sibling `workspace-*` directories, and immediate child workspaces. It ignores backup, documentation, worktree, dependency, cache, and Git paths. The command never shells out to OpenClaw and never writes files.
+
+Stable finding IDs:
+
+- `bootstrap-after-setup` - error when `BOOTSTRAP.md` remains after `setupCompletedAt`.
+- `orphan-workspace` - warning when an unconfigured workspace retains `BOOTSTRAP.md`.
+- `configured-placeholder` - warning when a configured agent retains stock or blank `IDENTITY.md` or `USER.md` fields.
+- `memory-contradicts-fresh` - error when `BOOTSTRAP.md` claims first-run state but the workspace already contains substantive memory.
+- `inactive-context-content` - warning when a substantive recognized bootstrap file is present but excluded from the configured tracked-file set.
+- `dangling-agent-reference` - error when `subagents.allowAgents` names an agent absent from `agents.list`; `*` remains valid.
+- `duplicate-context` - warning for exact normalized duplicate bootstrap content of at least 200 characters across configured workspaces.
+
+JSON output is a stable object with `ok`, `findings`, and severity counts. Each finding includes `check_id`, `severity`, `message`, and `path`, plus `agent_id` when one agent owns the finding. Exit status is 0 with no findings, 1 for warning-only findings, and 2 for any error or unreadable/invalid required input. Human output carries the same information in deterministic order.
 
 ### Tracked files (default, overridable via config)
 
