@@ -626,6 +626,199 @@ def test_explicit_workspace_wins_for_default_and_non_default(
     assert resolved["helper"] == helper_ws.resolve()
 
 
+def test_normalize_uppercase_agent_id(tmp_path: Path) -> None:
+    home = tmp_path / "openclaw-home"
+    primary = tmp_path / "named-primary"
+    config_path = tmp_path / "openclaw.json"
+    config = {
+        "agents": {
+            "defaults": {"workspace": str(primary)},
+            "list": [
+                {"id": "MAIN"},
+                {"id": "Helper"},
+            ],
+        }
+    }
+    resolved = resolve_agent_workspaces(config, config_path, openclaw_home=home)
+    assert resolved == {
+        "main": primary.resolve(),
+        "helper": (primary / "helper").resolve(),
+    }
+
+
+def test_normalize_surrounding_whitespace_agent_id(tmp_path: Path) -> None:
+    home = tmp_path / "openclaw-home"
+    primary = tmp_path / "named-primary"
+    config_path = tmp_path / "openclaw.json"
+    config = {
+        "agents": {
+            "defaults": {"workspace": str(primary)},
+            "list": [
+                {"id": "  coder  ", "default": True},
+                {"id": "\thelper\n"},
+            ],
+        }
+    }
+    resolved = resolve_agent_workspaces(config, config_path, openclaw_home=home)
+    assert resolved == {
+        "coder": primary.resolve(),
+        "helper": (primary / "helper").resolve(),
+    }
+
+
+def test_normalize_invalid_characters_are_hyphenated(tmp_path: Path) -> None:
+    home = tmp_path / "openclaw-home"
+    config_path = tmp_path / "elsewhere" / "openclaw.json"
+    config_path.parent.mkdir()
+    config = {
+        "agents": {
+            "list": [
+                {"id": "main"},
+                {"id": "ops/team"},
+                {"id": "my agent"},
+            ]
+        }
+    }
+    resolved = resolve_agent_workspaces(config, config_path, openclaw_home=home)
+    assert resolved["main"] == (home / "workspace").resolve()
+    assert resolved["ops-team"] == (home / "workspace-ops-team").resolve()
+    assert resolved["my-agent"] == (home / "workspace-my-agent").resolve()
+    assert set(resolved) == {"main", "ops-team", "my-agent"}
+
+
+def test_normalize_collisions_use_first_entry_workspace(tmp_path: Path) -> None:
+    home = tmp_path / "openclaw-home"
+    first_ws = tmp_path / "first-ws"
+    second_ws = tmp_path / "second-ws"
+    config_path = tmp_path / "openclaw.json"
+    config = {
+        "agents": {
+            "list": [
+                {"id": "Coder", "workspace": str(first_ws)},
+                {"id": "coder", "workspace": str(second_ws)},
+            ]
+        }
+    }
+    resolved = resolve_agent_workspaces(config, config_path, openclaw_home=home)
+    assert resolved == {"coder": first_ws.resolve()}
+
+
+def test_normalize_later_colliding_default_keeps_first_entry_workspace(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "openclaw-home"
+    primary = tmp_path / "named-primary"
+    first_ws = tmp_path / "first-ws"
+    second_ws = tmp_path / "second-ws"
+    config_path = tmp_path / "openclaw.json"
+    config = {
+        "agents": {
+            "defaults": {"workspace": str(primary)},
+            "list": [
+                {"id": "Coder", "workspace": str(first_ws)},
+                {"id": "coder", "default": True, "workspace": str(second_ws)},
+            ],
+        }
+    }
+    resolved = resolve_agent_workspaces(config, config_path, openclaw_home=home)
+    assert resolved == {"coder": first_ws.resolve()}
+
+
+def test_normalize_default_selection(tmp_path: Path) -> None:
+    home = tmp_path / "openclaw-home"
+    primary = tmp_path / "named-primary"
+    config_path = tmp_path / "openclaw.json"
+    config = {
+        "agents": {
+            "defaults": {"workspace": str(primary)},
+            "list": [
+                {"id": "Helper"},
+                {"id": "CODER", "default": True},
+            ],
+        }
+    }
+    resolved = resolve_agent_workspaces(config, config_path, openclaw_home=home)
+    assert resolved["coder"] == primary.resolve()
+    assert resolved["helper"] == (primary / "helper").resolve()
+
+
+def test_normalize_allow_agents_matches_case_and_sanitization(
+    tmp_path: Path,
+) -> None:
+    _home, config_path, primary = _openclaw_home(
+        tmp_path,
+        agents=[{"id": "Coder"}, {"id": "ops-team"}],
+        allow_agents=["CODER", "  ops/team  "],
+        defaults_allow_agents=["coder"],
+    )
+    _seed_workspace(primary, setup_completed=True)
+    report = collect_findings(load_openclaw_config(config_path), config_path)
+    assert "dangling-agent-reference" not in _finding_ids(report)
+
+
+def test_normalize_truly_absent_reference_is_dangling(tmp_path: Path) -> None:
+    _home, config_path, primary = _openclaw_home(
+        tmp_path,
+        agents=[{"id": "MAIN"}],
+        allow_agents=["Ghost!", "ghost", "missing-helper"],
+    )
+    _seed_workspace(primary, setup_completed=True)
+    report = collect_findings(load_openclaw_config(config_path), config_path)
+    dangling = [f for f in report.findings if f.check_id == "dangling-agent-reference"]
+    assert {f.agent_id for f in dangling} == {"main"}
+    assert {f.message for f in dangling} == {
+        "subagents.allowAgents names 'Ghost!' which is absent from agents.list",
+        "subagents.allowAgents names 'missing-helper' which is absent from agents.list",
+    }
+
+
+def test_normalize_agent_id_truncated_to_64_chars(tmp_path: Path) -> None:
+    home = tmp_path / "openclaw-home"
+    config_path = tmp_path / "elsewhere" / "openclaw.json"
+    config_path.parent.mkdir()
+    long_id = "a" * 70
+    truncated = "a" * 64
+    config = {"agents": {"list": [{"id": "main"}, {"id": long_id}]}}
+    resolved = resolve_agent_workspaces(config, config_path, openclaw_home=home)
+    assert truncated in resolved
+    assert resolved[truncated] == (home / f"workspace-{truncated}").resolve()
+    assert long_id not in resolved
+
+
+def test_normalize_all_invalid_agent_id_falls_back_to_main(tmp_path: Path) -> None:
+    home = tmp_path / "openclaw-home"
+    primary = tmp_path / "named-primary"
+    config_path = tmp_path / "openclaw.json"
+    config = {
+        "agents": {
+            "defaults": {"workspace": str(primary)},
+            "list": [{"id": "@@@"}],
+        }
+    }
+    resolved = resolve_agent_workspaces(config, config_path, openclaw_home=home)
+    assert resolved == {"main": primary.resolve()}
+
+
+def test_normalize_finding_agent_values(tmp_path: Path) -> None:
+    first_ws = tmp_path / "first-ws"
+    second_ws = tmp_path / "second-ws"
+    _home, config_path, _primary = _openclaw_home(
+        tmp_path,
+        agents=[
+            {"id": "Coder", "workspace": str(first_ws)},
+            {"id": "coder", "default": True, "workspace": str(second_ws)},
+        ],
+    )
+    _seed_workspace(first_ws, setup_completed=True, identity=STOCK_IDENTITY)
+    _seed_workspace(second_ws, setup_completed=True, identity=FILLED_IDENTITY)
+    report = collect_findings(load_openclaw_config(config_path), config_path)
+    placeholders = [
+        f for f in report.findings if f.check_id == "configured-placeholder"
+    ]
+    assert [f.path for f in placeholders] == [first_ws / "IDENTITY.md"]
+    assert placeholders[0].agent_id == "coder"
+
+
 def test_orphan_sibling_roots_at_later_explicit_default_workspace(
     tmp_path: Path,
 ) -> None:

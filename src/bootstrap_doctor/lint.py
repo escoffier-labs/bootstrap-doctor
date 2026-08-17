@@ -48,6 +48,10 @@ IGNORED_COMPONENTS = frozenset(
 
 _FIELD_RE = re.compile(r"^- \*\*(?P<field>[^*]+):\*\*[ \t]*(?P<value>.*)$")
 _ITALIC_HINT_RE = re.compile(r"^_\(.*\)_$")
+_VALID_AGENT_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$", re.IGNORECASE)
+_INVALID_AGENT_ID_CHARS_RE = re.compile(r"[^a-z0-9_-]+")
+_LEADING_HYPHEN_RE = re.compile(r"^-+")
+_TRAILING_HYPHEN_RE = re.compile(r"-+$")
 _STOCK_VALUES = frozenset(
     {"your name", "todo", "tbd", "changeme", "xxx", "n/a"}
 )
@@ -177,13 +181,27 @@ def _agent_entries(config: dict[str, Any]) -> list[dict[str, Any]]:
     return out
 
 
+def _normalize_agent_id(value: str) -> str:
+    """Match OpenClaw normalizeAgentId: trim, lowercase, sanitize, else main."""
+    trimmed = value.strip()
+    if not trimmed:
+        return DEFAULT_AGENT_ID
+    lowered = trimmed.lower()
+    if _VALID_AGENT_ID_RE.fullmatch(trimmed):
+        return lowered
+    sanitized = _INVALID_AGENT_ID_CHARS_RE.sub("-", lowered)
+    sanitized = _LEADING_HYPHEN_RE.sub("", sanitized)
+    sanitized = _TRAILING_HYPHEN_RE.sub("", sanitized)[:64]
+    return sanitized or DEFAULT_AGENT_ID
+
+
 def _default_agent_id(entries: Sequence[dict[str, Any]]) -> str:
     if not entries:
         return DEFAULT_AGENT_ID
     for entry in entries:
         if entry.get("default") is True:
-            return entry["id"]
-    return entries[0]["id"]
+            return _normalize_agent_id(entry["id"])
+    return _normalize_agent_id(entries[0]["id"])
 
 
 def _state_home(openclaw_home: Path | None) -> Path:
@@ -223,7 +241,9 @@ def resolve_agent_workspaces(
         default_id = DEFAULT_AGENT_ID
     resolved: dict[str, Path] = {}
     for entry in entries:
-        agent_id = entry["id"]
+        agent_id = _normalize_agent_id(entry["id"])
+        if agent_id in resolved:
+            continue
         raw = entry.get("workspace")
         if isinstance(raw, str) and raw.strip():
             resolved[agent_id] = _resolve_user_path(raw.strip(), config_path)
@@ -446,16 +466,21 @@ def collect_findings(
     configured = {path.resolve() for path in workspaces.values()}
     candidates = discover_workspace_candidates(primary, configured=configured)
     findings: list[LintFinding] = []
-    known_ids = {entry["id"] for entry in entries} or {DEFAULT_AGENT_ID}
+    known_ids = {_normalize_agent_id(entry["id"]) for entry in entries} or {
+        DEFAULT_AGENT_ID
+    }
     dangling_seen: set[str] = set()
     for owner, block in (
         (None, _defaults_block(config)),
-        *((entry["id"], entry) for entry in entries),
+        *((_normalize_agent_id(entry["id"]), entry) for entry in entries),
     ):
         for name in _allow_agents(block):
-            if name == "*" or name in known_ids or name in dangling_seen:
+            if name.strip() == "*":
                 continue
-            dangling_seen.add(name)
+            normalized = _normalize_agent_id(name)
+            if normalized in known_ids or normalized in dangling_seen:
+                continue
+            dangling_seen.add(normalized)
             findings.append(
                 LintFinding(
                     check_id="dangling-agent-reference",
