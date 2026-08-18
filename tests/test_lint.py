@@ -93,6 +93,16 @@ SUBSTANTIVE_MEMORY = (
     "runbook plus the prior operator handoff.\n"
 )
 DUPLICATE_BODY = ("shared bootstrap policy for the lakehouse agents. " * 8).strip() + "\n"
+LONG_STOCK_USER = STOCK_USER + (
+    "\nThis stock USER.md template still has blank required fields. " * 6
+)
+LONG_STOCK_BOOTSTRAP = (
+    "# BOOTSTRAP.md - Hello, World\n\n"
+    + ("There is no memory yet. Complete first-run setup only. " * 8)
+)
+LONG_FILLED_IDENTITY = FILLED_IDENTITY + (
+    "\nLakehouse keeps one shared identity paragraph across agents. " * 8
+)
 IGNORED_COMPONENTS = (
     ".bootstrap-backups",
     "docs",
@@ -378,6 +388,131 @@ def test_duplicate_context_across_configured_workspaces(tmp_path: Path) -> None:
     assert dupes
     assert all(f.severity == "warning" for f in dupes)
     assert {f.path for f in dupes} <= {primary / "AGENTS.md", beta / "AGENTS.md"}
+
+
+def test_stock_identity_templates_are_not_duplicate_context(
+    tmp_path: Path,
+) -> None:
+    home, config_path, primary = _openclaw_home(
+        tmp_path,
+        agents=[
+            {"id": "main"},
+            {
+                "id": "beta",
+                "workspace": str(tmp_path / "openclaw-home" / "workspace-beta"),
+            },
+        ],
+    )
+    _seed_workspace(
+        primary,
+        setup_completed=True,
+        identity=STOCK_IDENTITY,
+        user=FILLED_USER,
+    )
+    _seed_workspace(
+        home / "workspace-beta",
+        setup_completed=True,
+        identity=STOCK_IDENTITY,
+        user=FILLED_USER,
+    )
+    report = collect_findings(load_openclaw_config(config_path), config_path)
+    assert "duplicate-context" not in _finding_ids(report)
+    placeholders = [
+        f for f in report.findings if f.check_id == "configured-placeholder"
+    ]
+    assert {f.path.name for f in placeholders} == {"IDENTITY.md"}
+    assert len(placeholders) == 2
+
+
+def test_stock_user_templates_are_not_duplicate_context(tmp_path: Path) -> None:
+    home, config_path, primary = _openclaw_home(
+        tmp_path,
+        agents=[
+            {"id": "main"},
+            {
+                "id": "beta",
+                "workspace": str(tmp_path / "openclaw-home" / "workspace-beta"),
+            },
+        ],
+    )
+    _seed_workspace(
+        primary,
+        setup_completed=True,
+        identity=FILLED_IDENTITY,
+        user=LONG_STOCK_USER,
+    )
+    _seed_workspace(
+        home / "workspace-beta",
+        setup_completed=True,
+        identity=FILLED_IDENTITY,
+        user=LONG_STOCK_USER,
+    )
+    report = collect_findings(load_openclaw_config(config_path), config_path)
+    assert "duplicate-context" not in _finding_ids(report)
+    placeholders = [
+        f for f in report.findings if f.check_id == "configured-placeholder"
+    ]
+    assert {f.path.name for f in placeholders} == {"USER.md"}
+    assert len(placeholders) == 2
+
+
+def test_bootstrap_is_excluded_from_duplicate_context(tmp_path: Path) -> None:
+    home, config_path, primary = _openclaw_home(
+        tmp_path,
+        agents=[
+            {"id": "main"},
+            {
+                "id": "beta",
+                "workspace": str(tmp_path / "openclaw-home" / "workspace-beta"),
+            },
+        ],
+    )
+    _seed_workspace(
+        primary,
+        identity=FILLED_IDENTITY,
+        user=FILLED_USER,
+        extra={"BOOTSTRAP.md": LONG_STOCK_BOOTSTRAP},
+    )
+    _seed_workspace(
+        home / "workspace-beta",
+        identity=FILLED_IDENTITY,
+        user=FILLED_USER,
+        extra={"BOOTSTRAP.md": LONG_STOCK_BOOTSTRAP},
+    )
+    report = collect_findings(load_openclaw_config(config_path), config_path)
+    assert "duplicate-context" not in _finding_ids(report)
+
+
+def test_filled_identity_duplicate_is_still_reported(tmp_path: Path) -> None:
+    home, config_path, primary = _openclaw_home(
+        tmp_path,
+        agents=[
+            {"id": "main"},
+            {
+                "id": "beta",
+                "workspace": str(tmp_path / "openclaw-home" / "workspace-beta"),
+            },
+        ],
+    )
+    _seed_workspace(
+        primary,
+        setup_completed=True,
+        identity=LONG_FILLED_IDENTITY,
+        user=FILLED_USER,
+    )
+    _seed_workspace(
+        home / "workspace-beta",
+        setup_completed=True,
+        identity=LONG_FILLED_IDENTITY,
+        user=FILLED_USER,
+    )
+    report = collect_findings(load_openclaw_config(config_path), config_path)
+    dupes = [f for f in report.findings if f.check_id == "duplicate-context"]
+    assert {f.path for f in dupes} == {
+        primary / "IDENTITY.md",
+        home / "workspace-beta" / "IDENTITY.md",
+    }
+    assert "configured-placeholder" not in _finding_ids(report)
 
 
 def test_short_duplicate_is_ignored(tmp_path: Path) -> None:
@@ -1036,6 +1171,8 @@ def test_render_json_shape_and_paths(tmp_path: Path) -> None:
         setup_completed=True,
         identity=STOCK_IDENTITY,
     )
+    orphan = primary.parent / "workspace-ghost"
+    _seed_workspace(orphan, bootstrap=True, identity=None, user=None)
     report = collect_findings(load_openclaw_config(config_path), config_path)
     data = json.loads(render_json(report))
     assert set(data) >= {"ok", "findings", "error_count", "warning_count"}
@@ -1043,11 +1180,17 @@ def test_render_json_shape_and_paths(tmp_path: Path) -> None:
     assert data["error_count"] == report.error_count
     assert data["warning_count"] == report.warning_count
     assert data["error_count"] >= 1
-    row = data["findings"][0]
-    assert {"check_id", "severity", "message", "path"} <= set(row)
-    assert isinstance(row["path"], str)
-    assert row["check_id"] == report.findings[0].check_id
-    assert Path(row["path"]) == report.findings[0].path
+    required = {"check_id", "severity", "message", "path", "agent_id"}
+    assert data["findings"]
+    for row, finding in zip(data["findings"], report.findings, strict=True):
+        assert required <= set(row)
+        assert isinstance(row["path"], str)
+        assert row["check_id"] == finding.check_id
+        assert Path(row["path"]) == finding.path
+        assert row["agent_id"] == finding.agent_id
+        assert row["agent_id"] is None or isinstance(row["agent_id"], str)
+    assert any(row["agent_id"] is None for row in data["findings"])
+    assert any(isinstance(row["agent_id"], str) for row in data["findings"])
 
 
 def test_render_text_includes_ids_paths_and_summary(tmp_path: Path) -> None:

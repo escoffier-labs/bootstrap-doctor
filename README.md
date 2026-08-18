@@ -125,9 +125,9 @@ Stable finding IDs:
 - `memory-contradicts-fresh` - error when `BOOTSTRAP.md` claims first-run state but the workspace already contains substantive memory.
 - `inactive-context-content` - warning when a substantive recognized bootstrap file is present but excluded from the configured tracked-file set.
 - `dangling-agent-reference` - error when `subagents.allowAgents` names an agent absent from `agents.list`; `*` remains valid.
-- `duplicate-context` - warning for exact normalized duplicate bootstrap content of at least 200 characters across configured workspaces.
+- `duplicate-context` - warning for exact normalized duplicate bootstrap content of at least 200 characters across configured workspaces. `BOOTSTRAP.md` is excluded. Stock placeholder `IDENTITY.md` and `USER.md` templates are skipped; filled or custom copies still count.
 
-`--json` prints a stable object with `ok`, `findings`, `error_count`, and `warning_count`. Each finding has `check_id`, `severity`, `message`, and `path`, plus `agent_id` when one agent owns it.
+`--json` prints a stable object with `ok`, `findings`, `error_count`, and `warning_count`. Each finding has `check_id`, `severity`, `message`, `path`, and `agent_id`. `agent_id` is `null` when no agent owns the finding.
 
 Exit codes: `0` clean, `1` warning-only findings, `2` any error or unreadable/invalid `openclaw.json`.
 

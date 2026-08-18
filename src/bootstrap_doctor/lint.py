@@ -27,12 +27,6 @@ RECOGNIZED_FILES: tuple[str, ...] = tuple(DEFAULT_TRACKED_FILES)
 IDENTITY_REQUIRED_FIELDS = ("Name", "Creature", "Vibe", "Emoji")
 USER_REQUIRED_FIELDS = ("Name", "What to call them", "Timezone")
 WORKSPACE_STATE_FILENAME = "openclaw-workspace-state.json"
-WORKSPACE_MARKERS = frozenset(
-    {
-        *RECOGNIZED_FILES,
-        WORKSPACE_STATE_FILENAME,
-    }
-)
 IGNORED_COMPONENTS = frozenset(
     {
         ".bootstrap-backups",
@@ -323,8 +317,7 @@ def discover_workspace_candidates(
                 continue
             if not _is_file(child / "BOOTSTRAP.md"):
                 continue
-            if any(_is_file(child / marker) or _is_dir(child / marker) for marker in WORKSPACE_MARKERS):
-                add(child)
+            add(child)
 
     return sorted(seen, key=lambda path: str(path))
 
@@ -605,9 +598,19 @@ def collect_findings(
         if not _is_dir(workspace):
             continue
         for name in RECOGNIZED_FILES:
+            if name == "BOOTSTRAP.md":
+                continue
             path = workspace / name
             text = _read_text(path) if _is_file(path) else None
             if text is None:
+                continue
+            if name == "IDENTITY.md" and _has_placeholder_fields(
+                text, IDENTITY_REQUIRED_FIELDS
+            ):
+                continue
+            if name == "USER.md" and _has_placeholder_fields(
+                text, USER_REQUIRED_FIELDS
+            ):
                 continue
             normalized = _normalize(text)
             if len(normalized) < MIN_DUPLICATE_CHARS:
