@@ -98,12 +98,26 @@ def test_caps_prefer_agent_entry_over_defaults():
     assert (main.per_file, main.total) == (40000, 120000)
 
 
-@pytest.mark.parametrize("bad", [0, -1, "40000", None, True])
+@pytest.mark.parametrize(
+    "bad", [0, -1, "40000", None, True, float("nan"), float("inf"), -float("inf")]
+)
 def test_caps_reject_non_positive_and_non_numeric(bad):
     cfg = {"agents": {"defaults": {"bootstrapTotalMaxChars": bad}}}
     caps = runtime.resolve_effective_caps(cfg, "main", Path("c.json"))
     assert caps.total == runtime.OPENCLAW_DEFAULT_TOTAL_CHARS
     assert caps.total_configured is False
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [(40000.9, 40000), (10**1000, 10**1000)],
+    ids=["finite-float", "large-int"],
+)
+def test_caps_accept_finite_positive_numbers(value, expected):
+    cfg = {"agents": {"defaults": {"bootstrapTotalMaxChars": value}}}
+    caps = runtime.resolve_effective_caps(cfg, "main", Path("c.json"))
+    assert caps.total == expected
+    assert caps.total_configured is True
 
 
 def test_cap_drift_reports_disagreement(tmp_path):
@@ -275,7 +289,16 @@ def test_optional_file_on_disk_but_absent_from_prompt_is_hard(tmp_path):
     assert runtime.exit_code(report) == 2
 
 
-def test_latest_compiled_event_picks_newest_and_skips_bad_lines(tmp_path):
+@pytest.mark.parametrize(
+    "bad_line",
+    [
+        '{"type": "context.compiled", BROKEN',
+        json.dumps(["context.compiled"]),
+        json.dumps("context.compiled"),
+    ],
+    ids=["malformed-json", "array", "string"],
+)
+def test_latest_compiled_event_picks_newest_and_skips_bad_lines(tmp_path, bad_line):
     sessions = tmp_path / "agents" / "main" / "sessions"
     sessions.mkdir(parents=True)
     old = sessions / "old.trajectory.jsonl"
@@ -289,7 +312,7 @@ def test_latest_compiled_event_picks_newest_and_skips_bad_lines(tmp_path):
     )
     new = sessions / "new.trajectory.jsonl"
     new.write_text(
-        '{"type": "context.compiled", BROKEN\n'
+        bad_line + "\n"
         + json.dumps(
             {"type": "context.compiled", "ts": "2026-08-12T00:00:00Z",
              "data": {"systemPrompt": "new"}}

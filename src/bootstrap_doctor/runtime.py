@@ -39,6 +39,7 @@ No LLM calls, no mutations, stdlib only.
 from __future__ import annotations
 
 import json
+import math
 import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -151,6 +152,8 @@ def load_openclaw_config(path: Path) -> dict[str, Any]:
 def _positive_int(value: Any) -> int | None:
     """OpenClaw accepts a finite positive number and floors it; mirror that."""
     if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    if isinstance(value, float) and not math.isfinite(value):
         return None
     if value <= 0:
         return None
@@ -299,7 +302,7 @@ def latest_compiled_event(
                     event = json.loads(line)
                 except ValueError:
                     continue
-                if event.get("type") != "context.compiled":
+                if not isinstance(event, dict) or event.get("type") != "context.compiled":
                     continue
                 key = event.get("sessionKey")
                 if session_filter and session_filter not in str(key or ""):
