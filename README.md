@@ -31,6 +31,11 @@
 pipx install git+https://github.com/escoffier-labs/bootstrap-doctor
 bootstrap-doctor status
 bootstrap-doctor lint
+```
+
+`status` and `lint` need no LLM gateway. Before running `audit` or `trim`, configure `gateway_url` and `gateway_model` in [config](#config) and ensure the endpoint is reachable and serves `/v1/chat/completions` for that model (default URL: `http://localhost:11434`).
+
+```bash
 bootstrap-doctor audit
 bootstrap-doctor trim
 ```
@@ -240,13 +245,18 @@ It does not:
 ## Development
 
 ```bash
+python3 -m venv .venv
+source .venv/bin/activate
 python3 -m pip install -e ".[dev]"
-pytest -q
+./scripts/verify
 python3 -m ruff check .
 python3 -m mypy src/bootstrap_doctor
+python3 scripts/check_docs.py
 python3 -m build
 pip-audit . --skip-editable
 ```
+
+`./scripts/verify` runs pytest, with a Brigade receipt and outcome capture when available. Ruff and mypy run separately. The docs checker validates links and supported `bootstrap-doctor` snippet syntax without executing commands. See [Contributing](CONTRIBUTING.md) for its scope and the remote-link option.
 
 ## License
 

@@ -12,14 +12,17 @@ bootstrap-doctor automates the audit-and-relocate loop, mirroring the design of 
 
 ## Recommended approach
 
-A Python CLI (pipx-installable, mirrors memory-doctor's project layout and command shape) with three subcommands. Dry-run by default; `--apply` required to persist any change.
+A Python CLI (pipx-installable, mirrors memory-doctor's project layout and command shape) with five subcommands. Dry-run by default; `--apply` required to persist any change.
 
 ### Subcommands
 
 - **`bootstrap-doctor status`** - read-only. Reports each tracked file's char count, line count, and distance from soft/hard thresholds. No LLM calls.
+- **`bootstrap-doctor runtime`** - read-only. Checks tracked-file injection against OpenClaw's `context.compiled` trajectory evidence and reports effective cap drift. Reports unknown presence when the compiled event omits prompt text or the harness delivers bootstrap through another channel. No LLM calls.
 - **`bootstrap-doctor lint`** - read-only and deterministic. Compares configured OpenClaw agents, workspace setup state, and bootstrap content to report lifecycle and context drift. No LLM calls and no repairs.
 - **`bootstrap-doctor audit`** - read-only. Runs heuristic shortlist then LLM judge, then prints per-section verdicts (`keep` / `move` / `unsure`) with reasons and topic. Verdicts are cached by content hash so re-runs are cheap.
 - **`bootstrap-doctor trim`** - applies the audit plan. Dry-run by default; `--apply` performs atomic writes. Always shows a git-style diff preview.
+
+Run `status` and `lint` without a gateway. Before `audit` or `trim`, configure a reachable OpenAI-compatible `gateway_url` and a `gateway_model` served by its `/v1/chat/completions` endpoint.
 
 ### Lifecycle lint contract
 
@@ -106,6 +109,8 @@ bootstrap-doctor/
 │   ├── cli.py            # argparse entrypoint, subcommand dispatch
 │   ├── paths.py          # config resolution + defaults
 │   ├── status.py         # size/limit reporting
+│   ├── runtime.py        # trajectory-based injection check
+│   ├── lint.py           # deterministic lifecycle/context checks
 │   ├── parsing.py        # section splitter (heading-based)
 │   ├── heuristics.py     # shortlist rules (size, age, duplicates)
 │   ├── judge.py          # LLM gateway client (OpenAI-compatible) + verdict cache
