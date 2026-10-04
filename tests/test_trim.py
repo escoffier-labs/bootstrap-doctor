@@ -834,7 +834,7 @@ dir = "{cache}"
 
 
 def test_apply_warns_when_cards_dir_not_in_any_repo(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Cards-dir outside any git repo: warn, don't abort.
 
@@ -863,6 +863,20 @@ dir = "{cache}"
 '''
     )
     cfg2 = resolve_config(config_file=str(cfg_path))
+
+    # Keep real repo discovery inside the fixture, but exclude host metadata
+    # above it so the cards directory is deterministically outside any repo.
+    ancestor_git_entries = {parent / ".git" for parent in tmp_path.resolve().parents}
+    path_exists = Path.exists
+
+    def exists_without_host_git(path: Path) -> bool:
+        if path in ancestor_git_entries:
+            return False
+        return path_exists(path)
+
+    monkeypatch.setattr(Path, "exists", exists_without_host_git)
+    assert trim_mod.find_repo_root(ws) == ws
+    assert trim_mod.find_repo_root(cards) is None
 
     sections = parse_file(ws / "AGENTS.md")
     sec = sections[0]

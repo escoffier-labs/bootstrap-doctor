@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from bootstrap_doctor import paths as paths_mod
 from bootstrap_doctor.paths import (
     DEFAULT_CACHE_DIR,
     DEFAULT_CARDS_DIR,
@@ -25,6 +26,19 @@ from bootstrap_doctor.paths import (
 )
 
 # Helpers -----------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def isolated_default_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Discover default config only in this test's temporary directory."""
+    expand = paths_mod._expand
+
+    def expand_with_isolated_config(path_str: str) -> Path:
+        if path_str == "~/.config/bootstrap-doctor/config.toml":
+            return tmp_path / ".config" / "bootstrap-doctor" / "config.toml"
+        return expand(path_str)
+
+    monkeypatch.setattr(paths_mod, "_expand", expand_with_isolated_config)
 
 
 def _write_toml(path: Path, body: str) -> Path:
