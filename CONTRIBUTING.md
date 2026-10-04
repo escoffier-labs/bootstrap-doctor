@@ -7,9 +7,18 @@ content."
 ## Local setup
 
 ```bash
+python3 -m venv .venv
+source .venv/bin/activate
 python3 -m pip install -e ".[dev]"
-scripts/verify          # lint, type-check, and tests
+./scripts/verify       # pytest, with Brigade receipt/capture when available
+python3 -m ruff check .
+python3 -m mypy src/bootstrap_doctor
+python3 scripts/check_docs.py
 ```
+
+`./scripts/verify` runs only pytest, with Brigade verification and outcome capture when Brigade is on PATH. Ruff and mypy use the configuration in `pyproject.toml` and run separately after the venv dev install.
+
+`scripts/check_docs.py` checks `README.md` and Markdown under `docs/` for local links and anchors. Its command checks cover only supported `bootstrap-doctor` shell snippets and prompt transcripts, parsed against the CLI parser without execution. It does not validate other programs, gateway reachability, response correctness, printed output, or trim safety. Add `--remote` for bounded HTTP link checks, as `.github/workflows/docs.yml` does. Remote fragments are not checked.
 
 ## What lands easily
 

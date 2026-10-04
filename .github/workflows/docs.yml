@@ -1,0 +1,27 @@
+name: Docs
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  docs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # Parser imports require no package install. HTTP checks are explicit;
+      # missing links, auth/challenge responses and exhausted budgets fail.
+      - name: Check documentation links and command syntax
+        run: python scripts/check_docs.py --remote
