@@ -17,7 +17,7 @@ TOML schema:
     soft_limit = 17000
     hard_limit = 20000
     total_limit = 60000
-    tracked_files = ["AGENTS.md", "SOUL.md", "TOOLS.md", "IDENTITY.md", "USER.md", "HEARTBEAT.md", "BOOTSTRAP.md", "MEMORY.md"]
+    tracked_files = ["AGENTS.md", "SOUL.md", "IDENTITY.md", "USER.md", "HEARTBEAT.md", "BOOTSTRAP.md", "MEMORY.md"]
     named_workspaces = ["workspace-claude", "workspace-main"]
 
     [heuristics]
@@ -60,6 +60,7 @@ from __future__ import annotations
 
 import os
 import tomllib
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -78,10 +79,20 @@ DEFAULT_CARDS_DIR = "~/.openclaw/workspace/memory/cards"
 DEFAULT_GATEWAY_URL = "http://localhost:11434"
 # No default judge model: audit and trim fail fast until the user sets one.
 DEFAULT_GATEWAY_MODEL: str | None = None
+# OpenClaw 2026.8.1 dropped TOOLS.md from its bootstrap set (upstream
+# openclaw/openclaw#113966, merged 2026-07-27; first stable tag v2026.8.1, first
+# beta v2026.7.2-beta.5). Its ``doctor --fix`` merges a leftover TOOLS.md into
+# AGENTS.md under "## Tools". A host on an older OpenClaw can restore the file
+# with ``tracked_files`` in config.toml.
+TOOLS_MD_DROPPED_IN = "2026.8.1"
+LEGACY_TOOLS_MD_WARNING = (
+    f"TOOLS.md is not loaded by OpenClaw >= {TOOLS_MD_DROPPED_IN}; its doctor "
+    "will merge it into AGENTS.md on the next `doctor --fix`; move its notes "
+    "into memory cards."
+)
 DEFAULT_TRACKED_FILES: list[str] = [
     "AGENTS.md",
     "SOUL.md",
-    "TOOLS.md",
     "IDENTITY.md",
     "USER.md",
     "HEARTBEAT.md",
@@ -91,6 +102,9 @@ DEFAULT_TRACKED_FILES: list[str] = [
 DEFAULT_OPTIONAL_TRACKED_FILES = frozenset(
     {
         "SOUL.md",
+        # Not loaded by current OpenClaw; absent is the healthy state for a
+        # config that still lists it in tracked_files.
+        "TOOLS.md",
         "IDENTITY.md",
         "USER.md",
         "HEARTBEAT.md",
@@ -125,6 +139,20 @@ class Config:
 
 
 # Helpers ------------------------------------------------------------------
+
+
+def legacy_tools_md_files(directories: Iterable[Path]) -> list[Path]:
+    """Return every ``TOOLS.md`` present directly inside ``directories``.
+
+    Read-only. Symlinks and broken symlinks count as present, because OpenClaw's
+    doctor migration acts on the path either way.
+    """
+    found: list[Path] = []
+    for directory in directories:
+        candidate = directory / "TOOLS.md"
+        if os.path.lexists(candidate):
+            found.append(candidate)
+    return found
 
 
 def _expand(path_str: str) -> Path:

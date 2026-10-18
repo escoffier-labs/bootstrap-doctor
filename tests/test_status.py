@@ -744,7 +744,8 @@ def test_collect_totals_counts_surrogateescaped_missing_marker(
     [
         ("AGENTS.md", True),
         ("SOUL.md", True),
-        ("TOOLS.md", True),
+        # OpenClaw >= 2026.8.1 no longer injects TOOLS.md or its missing marker.
+        ("TOOLS.md", False),
         ("IDENTITY.md", True),
         ("USER.md", True),
         ("HEARTBEAT.md", True),
@@ -1097,3 +1098,70 @@ def test_run_text_output_no_json(
     # Text output shouldn't be valid JSON (it's a table).
     with pytest.raises(json.JSONDecodeError):
         json.loads(captured.out)
+
+
+# Legacy TOOLS.md ----------------------------------------------------------
+
+_TOOLS_WARNING = (
+    "TOOLS.md is not loaded by OpenClaw >= 2026.8.1; its doctor will merge it "
+    "into AGENTS.md on the next `doctor --fix`; move its notes into memory cards."
+)
+
+
+def test_default_config_does_not_track_tools_md(tmp_path: Path) -> None:
+    workspace = tmp_path / "ws"
+    (workspace / "memory" / "cards").mkdir(parents=True)
+    (workspace / "AGENTS.md").write_text("# a\n")
+    (workspace / "TOOLS.md").write_text("# t\n")
+    empty = tmp_path / "empty.toml"
+    empty.write_text("")
+    cfg = resolve_config(
+        config_file=str(empty),
+        workspace_dir=str(workspace),
+        cards_dir=str(workspace / "memory" / "cards"),
+    )
+    assert "TOOLS.md" not in {row.name for row in collect(cfg)}
+
+
+def test_status_warns_when_tools_md_exists(tmp_path: Path) -> None:
+    cfg = make_cfg(tmp_path, tracked=("A.md",))
+    _write(cfg.workspace_dir / "A.md", "x")
+    _write(cfg.workspace_dir / "TOOLS.md", "notes")
+    rows = collect(cfg)
+    out = render_text(rows, cfg)
+    assert f"warning: {cfg.workspace_dir / 'TOOLS.md'}: {_TOOLS_WARNING}" in out
+    data = json.loads(render_json(rows, cfg))
+    assert data["warnings"] == [
+        {
+            "check_id": "legacy-tools-md",
+            "path": str(cfg.workspace_dir / "TOOLS.md"),
+            "message": _TOOLS_WARNING,
+        }
+    ]
+    # A warning never changes the exit code on its own.
+    assert run(cfg) == 0
+
+
+def test_status_warns_for_named_workspace_tools_md(tmp_path: Path) -> None:
+    cfg = make_cfg(tmp_path, tracked=("A.md",), named=("agent-b",))
+    _write(cfg.workspace_dir / "A.md", "x")
+    _write(cfg.workspace_dir / "agent-b" / "A.md", "x")
+    _write(cfg.workspace_dir / "agent-b" / "TOOLS.md", "notes")
+    out = render_text(collect(cfg), cfg)
+    assert f"warning: {cfg.workspace_dir / 'agent-b' / 'TOOLS.md'}" in out
+
+
+def test_status_no_tools_warning_without_file(tmp_path: Path) -> None:
+    cfg = make_cfg(tmp_path, tracked=("A.md",))
+    _write(cfg.workspace_dir / "A.md", "x")
+    rows = collect(cfg)
+    assert "TOOLS.md" not in render_text(rows, cfg)
+    assert json.loads(render_json(rows, cfg))["warnings"] == []
+
+
+def test_absent_tools_md_is_optional_when_still_tracked(tmp_path: Path) -> None:
+    cfg = make_cfg(tmp_path, tracked=("A.md", "TOOLS.md"))
+    _write(cfg.workspace_dir / "A.md", "x")
+    by_name = {row.name: row for row in collect(cfg)}
+    assert by_name["TOOLS.md"].severity == "optional"
+    assert run(cfg) == 0

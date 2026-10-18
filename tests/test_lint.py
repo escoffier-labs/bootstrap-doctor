@@ -1270,3 +1270,33 @@ def test_load_openclaw_config_rejects_non_object(tmp_path: Path) -> None:
     path.write_text("[]", encoding="utf-8")
     with pytest.raises(Exception, match="JSON object"):
         load_openclaw_config(path)
+
+
+def test_legacy_tools_md_warning(tmp_path: Path) -> None:
+    from bootstrap_doctor.paths import LEGACY_TOOLS_MD_WARNING
+
+    _home, config_path, primary = _openclaw_home(
+        tmp_path, agents=[{"id": "main"}]
+    )
+    _seed_workspace(
+        primary,
+        setup_completed=True,
+        extra={"TOOLS.md": "# TOOLS.md\n\nLocal notes.\n"},
+    )
+    report = collect_findings(load_openclaw_config(config_path), config_path)
+    legacy = [f for f in report.findings if f.check_id == "legacy-tools-md"]
+    assert len(legacy) == 1
+    assert legacy[0].severity == "warning"
+    assert legacy[0].path == primary / "TOOLS.md"
+    assert legacy[0].message == LEGACY_TOOLS_MD_WARNING
+    # No second, generic finding for the same file.
+    assert "inactive-context-content" not in _finding_ids(report)
+
+
+def test_no_legacy_tools_md_warning_without_file(tmp_path: Path) -> None:
+    _home, config_path, primary = _openclaw_home(
+        tmp_path, agents=[{"id": "main"}]
+    )
+    _seed_workspace(primary, setup_completed=True)
+    report = collect_findings(load_openclaw_config(config_path), config_path)
+    assert "legacy-tools-md" not in _finding_ids(report)

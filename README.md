@@ -61,10 +61,12 @@ bootstrap-doctor status  (soft=17000, hard=20000, total=60000)
 workspace  /home/you/.openclaw/workspace
   file          chars  lines    soft    hard  sev
   AGENTS.md     14643    185   +2357   +5357  ok
-  TOOLS.md      11409    221   +5591   +8591  ok
+  SOUL.md        4284     47   +12716  +15716  ok
   BOOTSTRAP.md      -      -       -       -  OPTIONAL
   total: 49307/60000 (+10693 remaining, ok, complete)
 ```
+
+`TOOLS.md` is not tracked by default: OpenClaw 2026.8.1 and later no longer load it. If one exists, `status` (and `runtime`) print `warning: <path>/TOOLS.md: TOOLS.md is not loaded by OpenClaw >= 2026.8.1; its doctor will merge it into AGENTS.md on the next `doctor --fix`; move its notes into memory cards.` Hosts on an older OpenClaw can add it back through `tracked_files`.
 
 Use `--json` for machine-readable output with per-file limits, the 60,000-character workspace limit, per-workspace totals, and one row per tracked file. Character counts use OpenClaw's injected representation: trailing whitespace is removed and JavaScript UTF-16 code units are counted.
 
@@ -129,6 +131,7 @@ Stable finding IDs:
 - `configured-placeholder` - warning when a configured agent retains stock or blank `IDENTITY.md` or `USER.md` fields.
 - `memory-contradicts-fresh` - error when `BOOTSTRAP.md` claims first-run state but the workspace already contains substantive memory.
 - `inactive-context-content` - warning when a substantive recognized bootstrap file is present but excluded from the configured tracked-file set.
+- `legacy-tools-md` - warning when a configured workspace still has a `TOOLS.md`. OpenClaw 2026.8.1 and later no longer load it, and its `doctor --fix` merges it into `AGENTS.md`; move its notes into memory cards.
 - `dangling-agent-reference` - error when `subagents.allowAgents` names an agent absent from `agents.list`; `*` remains valid.
 - `duplicate-context` - warning for exact normalized duplicate bootstrap content of at least 200 characters across configured workspaces. `BOOTSTRAP.md` is excluded. Stock placeholder `IDENTITY.md` and `USER.md` templates are skipped; filled or custom copies still count.
 
@@ -199,8 +202,8 @@ soft_limit = 17000
 hard_limit = 20000
 total_limit = 60000
 tracked_files = [
-  "AGENTS.md", "SOUL.md", "TOOLS.md", "IDENTITY.md",
-  "USER.md", "HEARTBEAT.md", "BOOTSTRAP.md", "MEMORY.md",
+  "AGENTS.md", "SOUL.md", "IDENTITY.md", "USER.md",
+  "HEARTBEAT.md", "BOOTSTRAP.md", "MEMORY.md",
 ]
 named_workspaces = ["workspace-claude", "workspace-main", "workspace-researcher"]
 

@@ -45,7 +45,11 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-from bootstrap_doctor.paths import Config
+from bootstrap_doctor.paths import (
+    LEGACY_TOOLS_MD_WARNING,
+    Config,
+    legacy_tools_md_files,
+)
 
 # OpenClaw's own fallbacks, mirrored from
 # src/agents/embedded-agent-helpers/bootstrap.ts. Used only when openclaw.json
@@ -129,6 +133,8 @@ class RuntimeReport:
     files: list[InjectedFile] = field(default_factory=list)
     caps: EffectiveCaps | None = None
     cap_drift: list[str] = field(default_factory=list)
+    # TOOLS.md files OpenClaw no longer loads; reported, never an exit-code change.
+    legacy_tools_md: list[Path] = field(default_factory=list)
 
 
 # Effective caps ----------------------------------------------------------
@@ -472,6 +478,7 @@ def build_report(
         files=analyze_files(prompt_text, cfg, cfg.workspace_dir, optional_files),
         caps=caps,
         cap_drift=drift,
+        legacy_tools_md=legacy_tools_md_files([cfg.workspace_dir]),
     )
 
 
@@ -549,6 +556,10 @@ def render_text(report: RuntimeReport) -> str:
             f"  {row.name:<{name_w}}  {disk:>7}  {injected:>8}  {flag}"
         )
 
+    for legacy_path in report.legacy_tools_md:
+        lines.append("")
+        lines.append(f"warning: {legacy_path}: {LEGACY_TOOLS_MD_WARNING}")
+
     absent = [r for r in report.files if r.severity == SEV_ABSENT]
     truncated = [r for r in report.files if r.severity == SEV_TRUNCATED]
     lines.append("")
@@ -577,6 +588,14 @@ def render_json(report: RuntimeReport) -> str:
         "skipped_sessions": report.skipped_sessions,
         "foreign_runtime": report.foreign_runtime,
         "cap_drift": report.cap_drift,
+        "warnings": [
+            {
+                "check_id": "legacy-tools-md",
+                "path": str(path),
+                "message": LEGACY_TOOLS_MD_WARNING,
+            }
+            for path in report.legacy_tools_md
+        ],
         "caps": None,
         "files": [asdict(r) for r in report.files],
     }
