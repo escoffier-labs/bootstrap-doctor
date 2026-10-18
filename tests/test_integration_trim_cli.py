@@ -32,6 +32,7 @@ def _write_config(tmp_path: Path, workspace: Path, cards: Path) -> Path:
         f"""
 workspace_dir = "{workspace}"
 cards_dir = "{cards}"
+gateway_model = "test-model"
 soft_limit = 100
 hard_limit = 1000
 tracked_files = ["AGENTS.md"]

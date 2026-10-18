@@ -13,7 +13,7 @@ TOML schema:
     workspace_dir = "~/.openclaw/workspace"
     cards_dir = "~/.openclaw/workspace/memory/cards"
     gateway_url = "http://localhost:11434"
-    gateway_model = "deepseek-v4-pro:cloud"
+    gateway_model = "your-model-id"   # no default; required for audit and trim
     soft_limit = 17000
     hard_limit = 20000
     total_limit = 60000
@@ -49,6 +49,8 @@ Validation rules (all raise :class:`ConfigError`):
   - ``0 < soft_limit < hard_limit`` and ``total_limit > 0``.
   - ``min_section_chars > 0`` and ``stale_days > 0``.
   - ``gateway_url`` must start with ``http://`` or ``https://``.
+  - ``gateway_model`` has no default. It may be unset for ``status``,
+    ``runtime`` and ``lint``; ``audit`` and ``trim`` refuse to run without it.
   - ``tracked_files`` must be non-empty; each entry ends in ``.md`` and
     contains no path separators.
   - Each ``named_workspaces`` entry must be a non-empty string without path
@@ -74,7 +76,8 @@ from bootstrap_doctor.budgets import (
 DEFAULT_WORKSPACE_DIR = "~/.openclaw/workspace"
 DEFAULT_CARDS_DIR = "~/.openclaw/workspace/memory/cards"
 DEFAULT_GATEWAY_URL = "http://localhost:11434"
-DEFAULT_GATEWAY_MODEL = "deepseek-v4-pro:cloud"
+# No default judge model: audit and trim fail fast until the user sets one.
+DEFAULT_GATEWAY_MODEL: str | None = None
 DEFAULT_TRACKED_FILES: list[str] = [
     "AGENTS.md",
     "SOUL.md",
@@ -110,7 +113,7 @@ class Config:
     workspace_dir: Path
     cards_dir: Path
     gateway_url: str
-    gateway_model: str
+    gateway_model: str | None
     soft_limit: int
     hard_limit: int
     total_limit: int
@@ -331,7 +334,9 @@ def _validate_gateway_url(raw: Any) -> str:
     return raw
 
 
-def _validate_gateway_model(raw: Any) -> str:
+def _validate_gateway_model(raw: Any) -> str | None:
+    if raw is None:
+        return None
     return _validate_string_value(raw, "gateway_model")
 
 

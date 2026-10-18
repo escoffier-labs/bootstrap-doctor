@@ -275,8 +275,8 @@ def test_unsure_response_recorded(cfg: Config) -> None:
 
 
 def test_request_reserves_output_budget_for_reasoning_models(cfg: Config) -> None:
-    """Regression for issue #11: reasoning-model gateways (the default
-    deepseek-v4-pro:cloud) count reasoning tokens plus message.content
+    """Regression for issue #11: reasoning-model gateways count
+    reasoning tokens plus message.content
     against ``max_tokens``. A 400-token cap truncated the verdict JSON
     (finish_reason=length, empty/partial body); live repros needed
     reasoning of 1,558-1,890 chars before the JSON even started. The

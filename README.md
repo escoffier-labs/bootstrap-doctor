@@ -33,7 +33,7 @@ bootstrap-doctor status
 bootstrap-doctor lint
 ```
 
-`status` and `lint` need no LLM gateway. Before running `audit` or `trim`, configure `gateway_url` and `gateway_model` in [config](#config) and ensure the endpoint is reachable and serves `/v1/chat/completions` for that model (default URL: `http://localhost:11434`).
+`status` and `lint` need no LLM gateway. Before running `audit` or `trim`, configure `gateway_url` and `gateway_model` in [config](#config) (`gateway_model` has no default; `audit` and `trim` exit 2 with an error until it is set via the config file, `BOOTSTRAP_DOCTOR_GATEWAY_MODEL`, or `--gateway-model`) and ensure the endpoint is reachable and serves `/v1/chat/completions` for that model (default URL: `http://localhost:11434`).
 
 ```bash
 bootstrap-doctor audit
@@ -194,7 +194,7 @@ bootstrap-doctor runs a four-stage pipeline.
 workspace_dir = "~/.openclaw/workspace"
 cards_dir = "~/.openclaw/workspace/memory/cards"
 gateway_url = "http://localhost:11434"
-gateway_model = "deepseek-v4-pro:cloud"
+gateway_model = "your-model-id"   # required for audit and trim; no default
 soft_limit = 17000
 hard_limit = 20000
 total_limit = 60000

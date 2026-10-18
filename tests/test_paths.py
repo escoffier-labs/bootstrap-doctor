@@ -81,7 +81,7 @@ def test_default_constants_match_spec():
     assert DEFAULT_WORKSPACE_DIR == "~/.openclaw/workspace"
     assert DEFAULT_CARDS_DIR == "~/.openclaw/workspace/memory/cards"
     assert DEFAULT_GATEWAY_URL == "http://localhost:11434"
-    assert DEFAULT_GATEWAY_MODEL == "deepseek-v4-pro:cloud"
+    assert DEFAULT_GATEWAY_MODEL is None
     assert DEFAULT_SOFT_LIMIT == 17000
     assert DEFAULT_HARD_LIMIT == 20000
     assert DEFAULT_TOTAL_LIMIT == 60000
@@ -133,7 +133,7 @@ def test_defaults_applied_when_no_config_no_env_no_flags(
     )
     assert isinstance(cfg, Config)
     assert cfg.gateway_url == DEFAULT_GATEWAY_URL
-    assert cfg.gateway_model == DEFAULT_GATEWAY_MODEL
+    assert cfg.gateway_model is None
     assert cfg.soft_limit == DEFAULT_SOFT_LIMIT
     assert cfg.hard_limit == DEFAULT_HARD_LIMIT
     assert cfg.total_limit == DEFAULT_TOTAL_LIMIT
