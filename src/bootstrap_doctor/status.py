@@ -11,7 +11,9 @@ from pathlib import Path
 from bootstrap_doctor.paths import (
     DEFAULT_OPTIONAL_TRACKED_FILES,
     DEFAULT_TRACKED_FILES,
+    LEGACY_TOOLS_MD_WARNING,
     Config,
+    legacy_tools_md_files,
 )
 from bootstrap_doctor.safety import UnsafeTargetError, ensure_within
 
@@ -620,6 +622,18 @@ def _missing_named_workspace_dirs(cfg: Config) -> list[tuple[str, Path]]:
     return out
 
 
+def legacy_tools_md_warnings(cfg: Config) -> list[Path]:
+    """Paths of TOOLS.md files that current OpenClaw no longer loads.
+
+    Covers the primary workspace and every named workspace. Read-only.
+    """
+    try:
+        directories = [path for _label, path in _workspace_scopes(cfg)]
+    except UnsafeTargetError:
+        directories = [cfg.workspace_dir]
+    return legacy_tools_md_files(directories)
+
+
 def _fmt_delta(n: int) -> str:
     return f"{n:+d}"
 
@@ -632,6 +646,8 @@ def render_text(rows: list[FileStatus], cfg: Config) -> str:
     ]
     for name, path in _missing_named_workspace_dirs(cfg):
         lines.append(f"warning: named workspace {name!r} does not exist: {path}")
+    for path in legacy_tools_md_warnings(cfg):
+        lines.append(f"warning: {path}: {LEGACY_TOOLS_MD_WARNING}")
 
     grouped = _group_rows(rows)
 
@@ -710,6 +726,14 @@ def render_json(rows: list[FileStatus], cfg: Config) -> str:
             "total_soft_limit": total_soft_limit(cfg),
             "total_limit": cfg.total_limit,
             "totals": out_totals,
+            "warnings": [
+                {
+                    "check_id": "legacy-tools-md",
+                    "path": str(path),
+                    "message": LEGACY_TOOLS_MD_WARNING,
+                }
+                for path in legacy_tools_md_warnings(cfg)
+            ],
             "rows": out_rows,
         },
         indent=2,

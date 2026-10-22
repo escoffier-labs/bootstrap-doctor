@@ -35,6 +35,7 @@ Stable finding IDs:
 - `configured-placeholder` - warning when a configured agent retains stock or blank `IDENTITY.md` or `USER.md` fields.
 - `memory-contradicts-fresh` - error when `BOOTSTRAP.md` claims first-run state but the workspace already contains substantive memory.
 - `inactive-context-content` - warning when a substantive recognized bootstrap file is present but excluded from the configured tracked-file set.
+- `legacy-tools-md` - warning when a configured workspace still has a `TOOLS.md`. OpenClaw 2026.8.1 and later no longer load it, and its `doctor --fix` merges it into `AGENTS.md`; move its notes into memory cards.
 - `dangling-agent-reference` - error when `subagents.allowAgents` names an agent absent from `agents.list`; `*` remains valid.
 - `duplicate-context` - warning for exact normalized duplicate bootstrap content of at least 200 characters across configured workspaces. `BOOTSTRAP.md` is excluded. Stock placeholder `IDENTITY.md` and `USER.md` templates are skipped; filled or custom copies still count.
 
@@ -42,7 +43,7 @@ JSON output is a stable object with `ok`, `findings`, and severity counts. Each 
 
 ### Tracked files (default, overridable via config)
 
-`AGENTS.md`, `SOUL.md`, `TOOLS.md`, `IDENTITY.md`, `USER.md`, `HEARTBEAT.md`, `BOOTSTRAP.md`, and `MEMORY.md`. `SOUL.md`, `IDENTITY.md`, `USER.md`, `HEARTBEAT.md`, `BOOTSTRAP.md`, and `MEMORY.md` are optional when absent. `SAFETY_RULES.md` and `DREAMS.md` are not recognized OpenClaw bootstrap files. Each configured named workspace is scanned as its own scope.
+`AGENTS.md`, `SOUL.md`, `IDENTITY.md`, `USER.md`, `HEARTBEAT.md`, `BOOTSTRAP.md`, and `MEMORY.md`. `TOOLS.md` is no longer a default: OpenClaw 2026.8.1 dropped it from its bootstrap set (upstream openclaw/openclaw#113966), and its `doctor --fix` merges a leftover `TOOLS.md` into `AGENTS.md` under `## Tools`. `status`, `runtime`, and `lint` print a `legacy-tools-md` warning when a `TOOLS.md` exists ("TOOLS.md is not loaded by OpenClaw >= 2026.8.1; its doctor will merge it into AGENTS.md on the next `doctor --fix`; move its notes into memory cards."). The warning never changes the `status` or `runtime` exit code; in `lint` it is a warning-level finding. A host on an older OpenClaw can track it again with `tracked_files` in config; an absent `TOOLS.md` is optional. `SOUL.md`, `IDENTITY.md`, `USER.md`, `HEARTBEAT.md`, `BOOTSTRAP.md`, and `MEMORY.md` are optional when absent. `SAFETY_RULES.md` and `DREAMS.md` are not recognized OpenClaw bootstrap files. Each configured named workspace is scanned as its own scope.
 
 ### Thresholds
 
@@ -89,8 +90,8 @@ gateway_model = "your-model-id"   # required for audit and trim; no default
 soft_limit = 17000
 hard_limit = 20000
 total_limit = 60000
-tracked_files = ["AGENTS.md", "SOUL.md", "TOOLS.md", "IDENTITY.md",
-                 "USER.md", "HEARTBEAT.md", "BOOTSTRAP.md", "MEMORY.md"]
+tracked_files = ["AGENTS.md", "SOUL.md", "IDENTITY.md", "USER.md",
+                 "HEARTBEAT.md", "BOOTSTRAP.md", "MEMORY.md"]
 named_workspaces = ["workspace-claude", "workspace-main", "workspace-researcher"]
 heuristics.min_section_chars = 400
 heuristics.stale_days = 60

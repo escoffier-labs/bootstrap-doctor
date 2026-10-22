@@ -15,7 +15,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from bootstrap_doctor.paths import DEFAULT_TRACKED_FILES, Config
+from bootstrap_doctor.paths import (
+    DEFAULT_TRACKED_FILES,
+    LEGACY_TOOLS_MD_WARNING,
+    Config,
+)
 
 DEFAULT_AGENT_ID = "main"
 SEVERITY_ERROR = "error"
@@ -572,6 +576,18 @@ def collect_findings(
                         agent_id=agent_id,
                     )
                 )
+
+        legacy_tools = workspace / "TOOLS.md"
+        if os.path.lexists(legacy_tools):
+            findings.append(
+                LintFinding(
+                    check_id="legacy-tools-md",
+                    severity=SEVERITY_WARNING,
+                    message=LEGACY_TOOLS_MD_WARNING,
+                    path=legacy_tools,
+                    agent_id=agent_id,
+                )
+            )
 
         for name in RECOGNIZED_FILES:
             if name in tracked:

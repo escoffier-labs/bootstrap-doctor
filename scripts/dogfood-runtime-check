@@ -63,9 +63,11 @@ for f in AGENTS.md USER.md MEMORY.md; do
     echo "FAIL $f not reported absent"; fail=1
   fi
 done
-grep -qE "^  TOOLS.md .* (ok|TRUNCATED)$" "$REPLAY/out.txt" \
-  && echo "PASS TOOLS.md was present in the prompt" \
-  || { echo "FAIL TOOLS.md should have been present"; fail=1; }
+# OpenClaw >= 2026.8.1 no longer loads TOOLS.md, so the default tracked set
+# must not judge it either way.
+grep -qE "^  TOOLS.md " "$REPLAY/out.txt" \
+  && { echo "FAIL TOOLS.md should not be tracked by default"; fail=1; } \
+  || echo "PASS TOOLS.md is not tracked by default"
 rm -rf "$REPLAY"
 fi
 

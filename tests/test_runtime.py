@@ -7,7 +7,11 @@ from pathlib import Path
 import pytest
 
 from bootstrap_doctor import runtime
-from bootstrap_doctor.paths import DEFAULT_OPTIONAL_TRACKED_FILES, resolve_config
+from bootstrap_doctor.paths import (
+    DEFAULT_OPTIONAL_TRACKED_FILES,
+    LEGACY_TOOLS_MD_WARNING,
+    resolve_config,
+)
 
 TRACKED = ("AGENTS.md", "TOOLS.md", "SOUL.md", "MEMORY.md")
 
@@ -582,3 +586,41 @@ def test_openclaw_runtime_still_reports_absent(tmp_path):
     assert report.foreign_runtime is None
     assert {r.name: r.severity for r in report.files}["AGENTS.md"] == runtime.SEV_ABSENT
     assert runtime.exit_code(report) == 2
+
+
+def test_runtime_warns_when_tools_md_exists(tmp_path):
+    ws = _write_workspace(tmp_path, {"AGENTS.md": 100, "TOOLS.md": 200})
+    _write_trace(tmp_path, "main", _prompt({"AGENTS.md": "x" * 100}, ws))
+    cfg = _cfg(tmp_path, ws)
+
+    report = runtime.build_report(
+        cfg,
+        openclaw_home=tmp_path,
+        openclaw_config=tmp_path / "absent.json",
+        agent_id="main",
+        optional_files=DEFAULT_OPTIONAL_TRACKED_FILES,
+    )
+    assert report.legacy_tools_md == [ws / "TOOLS.md"]
+    assert f"warning: {ws / 'TOOLS.md'}: {LEGACY_TOOLS_MD_WARNING}" in (
+        runtime.render_text(report)
+    )
+    payload = json.loads(runtime.render_json(report))
+    assert payload["warnings"][0]["check_id"] == "legacy-tools-md"
+    assert payload["warnings"][0]["message"] == LEGACY_TOOLS_MD_WARNING
+
+
+def test_runtime_no_tools_warning_without_file(tmp_path):
+    ws = _write_workspace(tmp_path, {"AGENTS.md": 100})
+    _write_trace(tmp_path, "main", _prompt({"AGENTS.md": "x" * 100}, ws))
+    cfg = _cfg(tmp_path, ws)
+
+    report = runtime.build_report(
+        cfg,
+        openclaw_home=tmp_path,
+        openclaw_config=tmp_path / "absent.json",
+        agent_id="main",
+        optional_files=DEFAULT_OPTIONAL_TRACKED_FILES,
+    )
+    assert report.legacy_tools_md == []
+    assert "TOOLS.md is not loaded" not in runtime.render_text(report)
+    assert json.loads(runtime.render_json(report))["warnings"] == []

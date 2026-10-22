@@ -91,7 +91,6 @@ def test_default_constants_match_spec():
     assert DEFAULT_TRACKED_FILES == [
         "AGENTS.md",
         "SOUL.md",
-        "TOOLS.md",
         "IDENTITY.md",
         "USER.md",
         "HEARTBEAT.md",
@@ -102,6 +101,7 @@ def test_default_constants_match_spec():
     assert DEFAULT_OPTIONAL_TRACKED_FILES == frozenset(
         {
             "SOUL.md",
+            "TOOLS.md",
             "IDENTITY.md",
             "USER.md",
             "HEARTBEAT.md",
@@ -898,3 +898,42 @@ def test_config_is_frozen(
     )
     with pytest.raises(Exception):
         cfg.soft_limit = 1  # type: ignore[misc]
+
+
+def test_tools_md_is_not_a_default_bootstrap_file() -> None:
+    """OpenClaw >= 2026.8.1 dropped TOOLS.md; it stays configurable, not default."""
+    assert "TOOLS.md" not in DEFAULT_TRACKED_FILES
+    assert "TOOLS.md" in DEFAULT_OPTIONAL_TRACKED_FILES
+    assert paths_mod.TOOLS_MD_DROPPED_IN == "2026.8.1"
+    assert paths_mod.LEGACY_TOOLS_MD_WARNING == (
+        "TOOLS.md is not loaded by OpenClaw >= 2026.8.1; its doctor will merge "
+        "it into AGENTS.md on the next `doctor --fix`; move its notes into "
+        "memory cards."
+    )
+
+
+def test_tools_md_can_still_be_tracked_from_config(
+    workspace: Path, cards: Path, tmp_path: Path
+) -> None:
+    toml = _write_toml(
+        tmp_path / "bd.toml",
+        'tracked_files = ["AGENTS.md", "TOOLS.md"]\n',
+    )
+    cfg = resolve_config(
+        config_file=str(toml), workspace_dir=str(workspace), cards_dir=str(cards)
+    )
+    assert cfg.tracked_files == ("AGENTS.md", "TOOLS.md")
+
+
+def test_legacy_tools_md_files_finds_only_present_files(tmp_path: Path) -> None:
+    has = tmp_path / "has"
+    lacks = tmp_path / "lacks"
+    dangling = tmp_path / "dangling"
+    for d in (has, lacks, dangling):
+        d.mkdir()
+    (has / "TOOLS.md").write_text("notes")
+    (dangling / "TOOLS.md").symlink_to(tmp_path / "nowhere.md")
+    assert paths_mod.legacy_tools_md_files([has, lacks, dangling]) == [
+        has / "TOOLS.md",
+        dangling / "TOOLS.md",
+    ]
