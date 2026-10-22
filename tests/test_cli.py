@@ -42,16 +42,18 @@ def _write_config(
     hard: int = 200,
     total: int = 600,
     tracked: tuple[str, ...] = ("AGENTS.md",),
+    gateway_model: str | None = "test-model",
 ) -> Path:
     """Write a config.toml for end-to-end CLI runs."""
     cache = tmp_path / "cache"
     cfg_path = tmp_path / "config.toml"
     tracked_list = ", ".join(f'"{n}"' for n in tracked)
+    model_line = f'gateway_model = "{gateway_model}"\n' if gateway_model else ""
     cfg_path.write_text(
         f"""
 workspace_dir = "{workspace}"
 cards_dir = "{cards}"
-soft_limit = {soft}
+{model_line}soft_limit = {soft}
 hard_limit = {hard}
 total_limit = {total}
 tracked_files = [{tracked_list}]
@@ -1488,6 +1490,7 @@ def test_unsafe_named_workspace_returns_two(
         f'''
 workspace_dir = "{workspace}"
 cards_dir = "{cards}"
+gateway_model = "test-model"
 soft_limit = 100
 hard_limit = 200
 tracked_files = ["AGENTS.md"]
@@ -1552,3 +1555,43 @@ def test_trace_env_var_shows_traceback(
     captured = capsys.readouterr()
     assert code == 3
     assert "Traceback" in captured.err or "traced explosion" in captured.err
+
+
+@pytest.mark.parametrize("verb", ["audit", "trim"])
+def test_audit_and_trim_fail_fast_without_gateway_model(
+    verb: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.delenv("BOOTSTRAP_DOCTOR_GATEWAY_MODEL", raising=False)
+    workspace, cards = _mk_workspace(tmp_path)
+    (workspace / "AGENTS.md").write_text("# a\n\n## s\n\n" + "x" * 300)
+    cfg_path = _write_config(
+        tmp_path, workspace=workspace, cards=cards, gateway_model=None
+    )
+
+    def no_gateway(*_a: Any, **_k: Any) -> Any:
+        raise AssertionError("gateway must not be contacted without a model")
+
+    from bootstrap_doctor import judge as judge_mod
+
+    monkeypatch.setattr(judge_mod, "judge_all", no_gateway)
+
+    code = cli_mod.main([verb, "--config", str(cfg_path)])
+    err = capsys.readouterr().err
+    assert code == 2
+    assert "BOOTSTRAP_DOCTOR_GATEWAY_MODEL" in err
+    assert "gateway_model" in err
+
+
+def test_status_runs_without_gateway_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("BOOTSTRAP_DOCTOR_GATEWAY_MODEL", raising=False)
+    workspace, cards = _mk_workspace(tmp_path)
+    (workspace / "AGENTS.md").write_text("x" * 10)
+    cfg_path = _write_config(
+        tmp_path, workspace=workspace, cards=cards, gateway_model=None
+    )
+    assert cli_mod.main(["status", "--config", str(cfg_path)]) == 0

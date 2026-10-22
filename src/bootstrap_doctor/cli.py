@@ -432,6 +432,13 @@ def _run_audit_pipeline(
     args: argparse.Namespace, cfg
 ) -> tuple[list, list, Any, set[Path], set[Path], int] | int:
     """Return audit results plus hard files and hard aggregate workspaces."""
+    if not cfg.gateway_model:
+        _print_error(
+            "no judge model configured: set BOOTSTRAP_DOCTOR_GATEWAY_MODEL, "
+            "pass --gateway-model, or set gateway_model in the config file "
+            "(there is no built-in default)"
+        )
+        return 2
     from bootstrap_doctor import judge as judge_mod
     from bootstrap_doctor import status as status_mod
     from bootstrap_doctor.heuristics import Candidate, shortlist

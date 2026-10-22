@@ -85,7 +85,7 @@ All three are configurable, and the per-file and total hard limits are independe
 workspace_dir = "~/.openclaw/workspace"
 cards_dir = "~/.openclaw/workspace/memory/cards"
 gateway_url = "http://localhost:11434"
-gateway_model = "deepseek-v4-pro:cloud"
+gateway_model = "your-model-id"   # required for audit and trim; no default
 soft_limit = 17000
 hard_limit = 20000
 total_limit = 60000
