@@ -33,7 +33,7 @@ bootstrap-doctor status
 bootstrap-doctor lint
 ```
 
-`status` and `lint` need no LLM gateway. Before running `audit` or `trim`, configure `gateway_url` and `gateway_model` in [config](#config) (`gateway_model` has no default; `audit` and `trim` exit 2 with an error until it is set via the config file, `BOOTSTRAP_DOCTOR_GATEWAY_MODEL`, or `--gateway-model`) and ensure the endpoint is reachable and serves `/v1/chat/completions` for that model (default URL: `http://localhost:11434`).
+`status` and `lint` need no LLM gateway. Before running `audit` or `trim`, configure `gateway_url` and `gateway_model` in [config](#config) (`gateway_model` has no default, so `audit` and `trim` exit 2 with an error until it is set via the config file, `BOOTSTRAP_DOCTOR_GATEWAY_MODEL`, or `--gateway-model`) and ensure the endpoint is reachable and serves `/v1/chat/completions` for that model (default URL: `http://localhost:11434`).
 
 ```bash
 bootstrap-doctor audit
@@ -45,9 +45,9 @@ bootstrap-doctor trim
 | | Job | What you get |
 |---|---|---|
 | **Measure** | Every bootstrap surface | Size vs soft and hard limits |
-| **Lint** | Stale lifecycle and leftover context | Seven stable finding IDs; read-only |
-| **Audit** | What should move out | Heuristic shortlist; optional LLM judge |
-| **Trim** | Reference cards, not silent cut | Dry-run plan first; --apply after review |
+| **Lint** | Stale lifecycle and leftover context | Seven stable finding IDs, read-only |
+| **Audit** | What should move out | Heuristic shortlist, optional LLM judge |
+| **Trim** | Reference cards, not silent cut | Dry-run plan first, --apply after review |
 
 
 ## Usage
@@ -131,9 +131,9 @@ Stable finding IDs:
 - `configured-placeholder` - warning when a configured agent retains stock or blank `IDENTITY.md` or `USER.md` fields.
 - `memory-contradicts-fresh` - error when `BOOTSTRAP.md` claims first-run state but the workspace already contains substantive memory.
 - `inactive-context-content` - warning when a substantive recognized bootstrap file is present but excluded from the configured tracked-file set.
-- `legacy-tools-md` - warning when a configured workspace still has a `TOOLS.md`. OpenClaw 2026.8.1 and later no longer load it, and its `doctor --fix` merges it into `AGENTS.md`; move its notes into memory cards.
-- `dangling-agent-reference` - error when `subagents.allowAgents` names an agent absent from `agents.list`; `*` remains valid.
-- `duplicate-context` - warning for exact normalized duplicate bootstrap content of at least 200 characters across configured workspaces. `BOOTSTRAP.md` is excluded. Stock placeholder `IDENTITY.md` and `USER.md` templates are skipped; filled or custom copies still count.
+- `legacy-tools-md` - warning when a configured workspace still has a `TOOLS.md`. OpenClaw 2026.8.1 and later no longer load it, and its `doctor --fix` merges it into `AGENTS.md`. Move its notes into memory cards.
+- `dangling-agent-reference` - error when `subagents.allowAgents` names an agent absent from `agents.list`. `*` remains valid.
+- `duplicate-context` - warning for exact normalized duplicate bootstrap content of at least 200 characters across configured workspaces. `BOOTSTRAP.md` is excluded. Stock placeholder `IDENTITY.md` and `USER.md` templates are skipped. Filled or custom copies still count.
 
 `--json` prints a stable object with `ok`, `findings`, `error_count`, and `warning_count`. Each finding has `check_id`, `severity`, `message`, `path`, and `agent_id`. `agent_id` is `null` when no agent owns the finding.
 
@@ -171,7 +171,7 @@ workspace   AGENTS.md       codex-builder agent gotchas     533  large, stale   
 stats: gateway_requests=3  cache_hits=0  failures=0
 ```
 
-No writes. Verdicts cached by content hash so re-runs are cheap; pass `--no-cache` to bypass the cache for that run.
+No instruction files are written. Verdicts are cached by content hash so re-runs are cheap. Pass `--no-cache` to bypass the cache for that run.
 
 ### trim
 
@@ -204,7 +204,7 @@ bootstrap-doctor runs a four-stage pipeline.
 
 1. **Section parser.** Splits each tracked `.md` by H2/H3 headings into `(file, heading_path, body, char_count, last_touched_git_mtime)` tuples.
 2. **Heuristic shortlist.** Flags sections that look offload-worthy: body > 400 chars, contains a code block > 10 lines, no git touch in 60+ days, or duplicated across multiple tracked files.
-3. **LLM judge.** For each shortlisted section, POSTs to an OpenAI-compatible chat-completions endpoint (default `http://localhost:11434`, Ollama) with a structured prompt asking whether the section is *must-stay-loaded* (active rules, identity, currently-relevant state) or *reference-detail* (historical, exemplar, one-off setup). Verdict is one of `keep`, `move`, or `unsure`. Token budget capped per run; verdicts cached by SHA256 of section body in `~/.cache/bootstrap-doctor/verdicts.json`. Any OpenAI-compatible endpoint works (Ollama, OpenAI, vLLM, etc.); set `gateway_url` and `gateway_model` in config.
+3. **LLM judge.** For each shortlisted section, POSTs to an OpenAI-compatible chat-completions endpoint (default `http://localhost:11434`, Ollama) with a structured prompt asking whether the section is *must-stay-loaded* (active rules, identity, currently-relevant state) or *reference-detail* (historical, exemplar, one-off setup). Verdict is one of `keep`, `move`, or `unsure`. Token budget capped per run. Verdicts cached by SHA256 of section body in `~/.cache/bootstrap-doctor/verdicts.json`. Any OpenAI-compatible endpoint works (Ollama, OpenAI, vLLM, etc.). Set `gateway_url` and `gateway_model` in config.
 4. **Trim plan.** For each `move` verdict, writes a card to `memory/cards/<slug>.md` with the existing frontmatter convention, replaces the section in the original with a one-line breadcrumb pointing at the card. `keep` is a no-op. `unsure` is reported but never auto-applied.
 
 ## Config
@@ -247,8 +247,8 @@ Path-like values must be non-empty strings without control characters or leading
 
 - **A manual eyeball-and-copy pass** is the status quo: notice a file is too big, read a section, copy it to `memory/cards/`, leave a breadcrumb by hand. It gets skipped under load, and the file you miss is the one that truncates. bootstrap-doctor automates the audit-and-relocate loop and stays dry-run so you can review the plan first.
 - **A generic markdown or prose linter** measures readability, not the OpenClaw session-prefix budget. It does not know which files load every turn, where the soft/hard ceilings sit, or which sections are active rules versus reference detail. bootstrap-doctor is built around exactly those limits and that keep/move distinction.
-- **`wc -c` plus a script** tells you a file is over budget but not *what* to move. The judgement of must-stay-loaded versus reference-detail is the hard part, which is why bootstrap-doctor pairs heuristics with an LLM verdict instead of a raw size cutoff.
-- **A hosted memory or context service** would mean shipping your bootstrap files off the machine. bootstrap-doctor reads and rewrites local files only; the one optional network call is to an LLM gateway you configure and point wherever you trust.
+- **`wc -c` plus a script** tells you a file is over budget but not *what* to move. bootstrap-doctor uses heuristics and an LLM verdict to distinguish active rules from reference detail.
+- **A hosted memory or context service** would mean shipping your bootstrap files off the machine. bootstrap-doctor reads and rewrites local files only. The one optional network call is to an LLM gateway you configure and point wherever you trust.
 
 ## What bootstrap-doctor is not
 
