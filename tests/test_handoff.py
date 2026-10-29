@@ -520,6 +520,108 @@ def test_cli_has_no_config_judge_network_or_write_path(tmp_path, monkeypatch, ca
     assert "private" not in output.out and str(tmp_path) not in output.out
 
 
+@pytest.mark.parametrize(
+    "failure, expected, message",
+    [
+        (KeyboardInterrupt, 130, "interrupted"),
+        (BrokenPipeError, 3, "unexpected error in handoff validation"),
+        (RuntimeError, 3, "unexpected error in handoff validation"),
+    ],
+)
+def test_cli_handles_command_failures_without_importing_safety(
+    monkeypatch, capsys, failure, expected, message
+):
+    import builtins
+
+    from bootstrap_doctor import cli as cli_mod
+    from bootstrap_doctor import handoff as mod
+
+    original_import = builtins.__import__
+
+    def guarded_import(name, *args, **kwargs):
+        assert name != "bootstrap_doctor.safety", "handoff loaded legacy safety"
+        return original_import(name, *args, **kwargs)
+
+    def fail(**kwargs):
+        raise failure("private failure detail")
+
+    monkeypatch.setattr(builtins, "__import__", guarded_import)
+    monkeypatch.setattr(mod, "command", fail)
+    monkeypatch.setenv("BOOTSTRAP_DOCTOR_TRACE", "1")
+    assert (
+        cli_mod.main(
+            ["validate-handoff", "--repo", "/fixture", "--handoff", "/fixture.json"]
+        )
+        == expected
+    )
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert output.err == f"bootstrap-doctor: {message}\n"
+
+
+def test_descriptor_exhaustion_refuses_opaquely_and_closes_handles(tmp_path):
+    directories = ["/".join(["d"] * i) for i in range(1, 21)]
+    paths = ["AGENTS.md", *(f"{p}/AGENTS.md" for p in directories)]
+    vector = copy.deepcopy(CORPUS["vectors"][0])
+    vector.update(
+        directories=directories,
+        cwd=directories[-1],
+        files={p: "78" for p in paths},
+        project_doc_max_bytes=len(paths),
+        expected_sources=[
+            {
+                "path": path,
+                "selection_order": i,
+                "size_bytes": 1,
+                "sha256": hashlib.sha256(b"x").hexdigest(),
+                "cumulative_selected_bytes": i,
+                "consumed_raw_bytes": 1,
+                "rendered_utf8_bytes": 1,
+                "contribution": "loaded",
+            }
+            for i, path in enumerate(paths, 1)
+        ],
+        expected_baseline={
+            key: len(paths)
+            for key in ("selected_bytes", "consumed_raw_bytes", "rendered_utf8_bytes")
+        },
+    )
+    repo, path, _ = materialize(tmp_path, vector)
+    assert validate(repo, path)["status"] == "valid"
+    code = """import json, os, resource, sys
+from bootstrap_doctor.handoff import validate_handoff
+soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+resource.setrlimit(resource.RLIMIT_NOFILE, (32, hard))
+def opened():
+    count = 0
+    for fd in range(32):
+        try:
+            os.fstat(fd)
+        except OSError:
+            continue
+        count += 1
+    return count
+before = opened()
+for _ in range(3):
+    result = validate_handoff(repo=sys.argv[1], handoff=sys.argv[2])
+    assert result == {"schema": "bootstrap_doctor.handoff_validation.error",
+        "schema_version": 1, "actual_session_observed": False,
+        "reason": "identity_not_established"}, result
+    assert opened() == before, "descriptor leak after refusal"
+print(json.dumps(result))
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", code, str(repo), str(path)],
+        capture_output=True,
+        text=True,
+        env={**os.environ, "PYTHONPATH": str(Path(__file__).parents[1] / "src")},
+        timeout=10,
+    )
+    assert result.returncode == 0, result.stderr
+    refused(json.loads(result.stdout), "identity_not_established")
+    assert result.stderr == ""
+
+
 def test_cli_required_arguments_and_no_unrelated_options(tmp_path):
     repo, path, _ = materialize(tmp_path)
     for args in [

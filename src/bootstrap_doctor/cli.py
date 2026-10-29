@@ -693,7 +693,15 @@ def main(argv: list[str] | None = None) -> int:
     if args.verb == "validate-handoff":
         from bootstrap_doctor.handoff import command
 
-        return command(repo=args.repo, handoff=args.handoff, as_json=args.json)
+        try:
+            return command(repo=args.repo, handoff=args.handoff, as_json=args.json)
+        except KeyboardInterrupt:
+            _print_error("interrupted")
+            return 130
+        except Exception:
+            # Keep failures opaque even when legacy diagnostic tracing is enabled.
+            _print_error("unexpected error in handoff validation")
+            return 3
 
     from bootstrap_doctor.safety import UnsafeTargetError
 

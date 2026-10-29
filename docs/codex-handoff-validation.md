@@ -45,6 +45,8 @@ Refusal exits `2`. The existing OpenClaw commands retain their character units,
 classifications and exit behavior. Validation resolves no configuration,
 selects no replacement instruction chain, invokes no model, performs no network
 access, installs nothing, and writes no instructions, cards, caches or settings.
+CLI interrupts exit `130`. Unexpected command failures exit `3` with a fixed
+stderr diagnostic, including when legacy diagnostic tracing is enabled.
 
 The validator requires POSIX nofollow, nonblocking, dirfd and positional-read
 support. It binds every lexical absolute ancestor, the repository's location
@@ -60,6 +62,14 @@ raw prefixes, UTF-8 replacement, Rust whitespace, CRLF preservation and empty
 override precedence follow the pinned contract. Source descriptors remain open
 for a final bounded positional rehash and metadata, observation and directory
 revalidation.
+
+Inspection requires enough available process file descriptors to hold the
+artifact, its ancestors, the repository chain and every selected source through
+final validation. Protocol ceilings bound input size but do not reserve OS
+resources. A lower process descriptor limit can refuse an otherwise conforming
+artifact with `identity_not_established`. All acquired handles are closed on
+refusal. Run validation in a process with sufficient available descriptors for
+the selected chain.
 
 Resource limits are independent of the modeled cap: 1,048,576 bytes per source,
 8,388,608 bytes across sources, 256 sources, 128 repository-to-cwd directories,
