@@ -1,6 +1,6 @@
 # SAFETY_RULES.md
 
-Hard boundaries. These are not preferences. The content-guard pre-push hook and `brigade scrub` enforce some of these mechanically; the rest are agent-side rules.
+Hard boundaries. These are not preferences. The content-guard pre-push hook and `brigade scrub` enforce some of these mechanically. The rest are agent-side rules.
 
 ---
 
@@ -11,7 +11,7 @@ Hard boundaries. These are not preferences. The content-guard pre-push hook and 
 Sanitize before publishing:
 
 - **IP addresses:** Replace real IPs with documented examples (e.g. `203.0.113.x`, `192.0.2.x`, `198.51.100.x` from RFC 5737).
-- **Internal domain names:** Replace real domains with placeholders (e.g. `corp.local` -> `lab.local`).
+- **Internal domain names:** Replace real domains with reserved placeholders such as `corp.example.invalid`.
 - **OU names / paths:** Replace real OUs.
 - **Service account names:** Replace real accounts with descriptive placeholders.
 - **Hostnames:** Replace real hostnames with generic ones.
@@ -106,7 +106,7 @@ Before installing anything (even with user approval):
 
 ## Memory Hygiene
 
-- Do not write durable memory entries directly; use the handoff flow.
+- Do not write durable memory entries directly. Use the handoff flow.
 - Do not promote unverified reflections into canonical memory.
 - Stale memory is worse than missing memory. Update or remove entries when their basis changes.
 - Do not load knowledge cards in shared / group contexts that include other people.
@@ -148,7 +148,7 @@ Document the protected paths and what lives there.
 
 ## Personal Workstation Safety
 
-If the workspace shares a network with the user's personal daily driver (different machine, same LAN), treat that machine as **off-limits without explicit confirmation**. Do not restart, kill processes, install software, or modify settings remotely. Read-only access is fine; mutation is not.
+If the workspace shares a network with the user's personal daily driver (different machine, same LAN), treat that machine as **off-limits without explicit confirmation**. Do not restart, kill processes, install software, or modify settings remotely. Read-only access is fine. Mutation is not.
 
 ---
 

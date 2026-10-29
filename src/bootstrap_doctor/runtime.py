@@ -90,7 +90,7 @@ SEV_UNKNOWN = "unknown"
 SEV_SKIPPED = "skipped"
 
 # A bootstrap file heading inside the compiled prompt, e.g.
-# "### /home/you/.openclaw/workspace/TOOLS.md".
+# "### /workspace/TOOLS.md".
 _HEADING_RE = re.compile(r"^###[ \t]+(?P<path>\S+\.md)[ \t]*$", re.MULTILINE)
 
 
