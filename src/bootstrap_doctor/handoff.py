@@ -44,10 +44,8 @@ _POSIX_SUPPORTED = (
     os.name == "posix"
     and {_NATIVE_OPEN, _NATIVE_STAT} <= os.supports_dir_fd
     and _NATIVE_STAT in os.supports_follow_symlinks
-    and all(
-        hasattr(os, flag)
-        for flag in ("O_NOFOLLOW", "O_DIRECTORY", "O_NONBLOCK", "pread")
-    )
+    and all(hasattr(os, flag) for flag in ("O_NOFOLLOW", "O_DIRECTORY", "O_NONBLOCK"))
+    and callable(getattr(os, "pread", None))
 )
 _JSON = dict[str, Any]
 

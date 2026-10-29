@@ -867,11 +867,13 @@ def test_pinned_codex_contract_refuses_other_versions(tmp_path, field):
     refused(validate(repo, path), "unsupported_version")
 
 
-def test_missing_pread_is_unsupported_before_file_access(tmp_path):
+@pytest.mark.parametrize("delete_pread", [True, False], ids=["missing", "non-callable"])
+def test_missing_pread_is_unsupported_before_file_access(tmp_path, delete_pread):
     repo, path, _ = materialize(tmp_path)
-    code = """import os, json
-os.pread = None
-del os.pread
+    code = "import os, json\nos.pread = None\n"
+    if delete_pread:
+        code += "del os.pread\n"
+    code += """
 from bootstrap_doctor.handoff import validate_handoff
 print(json.dumps(validate_handoff(repo='/does-not-exist', handoff='/also-missing')))
 """

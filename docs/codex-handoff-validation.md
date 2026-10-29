@@ -11,7 +11,8 @@ bootstrap-doctor validate-handoff --repo /absolute/repository --handoff handoff.
 
 `--repo` must be absolute. `--handoff` names a regular local JSON file and may
 be relative to the process working directory. The handoff records the intended
-repository-relative cwd. Both flags are mandatory. Omit `--json` for a human
+repository-relative cwd. Neither path may contain a symlinked ancestor, including
+the handoff file's parent directories. Both flags are mandatory. Omit `--json` for a human
 report with exact byte counts and secondary KiB values. JSON output is canonical
 UTF-8 with one final newline. Validation refusals have exactly `schema`,
 `schema_version`, `actual_session_observed` and an opaque `reason`, without
