@@ -58,7 +58,7 @@ bootstrap-doctor trim
 $ bootstrap-doctor status
 bootstrap-doctor status  (soft=17000, hard=20000, total=60000)
 
-workspace  /home/you/.openclaw/workspace
+workspace  ~/.openclaw/workspace
   file          chars  lines    soft    hard  sev
   AGENTS.md     14643    185   +2357   +5357  ok
   SOUL.md        4284     47   +12716  +15716  ok
@@ -78,13 +78,13 @@ Use `--json` for machine-readable output with per-file limits, the 60,000-charac
 $ bootstrap-doctor runtime
 bootstrap-doctor runtime  (agent=main)
 
-effective caps from /home/you/.openclaw/openclaw.json
+effective caps from ~/.openclaw/openclaw.json
   per-file  40000 (configured)
   total     120000 (configured)
   DRIFT total budget: OpenClaw will apply 120000, bootstrap-doctor is configured for 60000
 
 newest compiled prompt  2026-08-13T12:13:26.294Z
-  trace   /home/you/.openclaw/agents/main/sessions/c263c3f5.trajectory.jsonl
+  trace   ~/.openclaw/agents/main/sessions/c263c3f5.trajectory.jsonl
   session agent:main:telegram:direct:123
   model   grok-4.6
   chars   20000
@@ -114,9 +114,9 @@ Scope with `--agent`, `--session-key`, `--openclaw-home`, and `--openclaw-config
 ```
 $ bootstrap-doctor lint
 bootstrap-doctor lint
-error  bootstrap-after-setup  /home/you/.openclaw/workspace/BOOTSTRAP.md  agent=main
+error  bootstrap-after-setup  ~/.openclaw/workspace/BOOTSTRAP.md  agent=main
   BOOTSTRAP.md remains after setupCompletedAt
-warning  configured-placeholder  /home/you/.openclaw/workspace/IDENTITY.md  agent=main
+warning  configured-placeholder  ~/.openclaw/workspace/IDENTITY.md  agent=main
   IDENTITY.md retains stock or blank placeholder fields
 
 summary: 1 error(s), 1 warning(s)
@@ -140,6 +140,24 @@ Stable finding IDs:
 Exit codes: `0` clean, `1` warning-only findings, `2` any error or unreadable/invalid `openclaw.json`.
 
 `--openclaw-home` defaults to `~/.openclaw` and supplies the default config path (`~/.openclaw/openclaw.json`). `--openclaw-config` overrides that file explicitly.
+
+### validate-handoff
+
+Validate a fresh local Brigade v1 Codex accounting handoff against the same
+repository and selected source bytes:
+
+```bash
+bootstrap-doctor validate-handoff --repo /absolute/repository --handoff handoff.json --json
+```
+
+Both inputs are required. This command reads only the explicit artifact, its
+declared observations and selected files. It bypasses OpenClaw configuration,
+workspace discovery and the judge. Output reports exact byte counts and cap
+provenance, with `actual_session_observed: false`. Valid modeled truncation
+still exits `0`. Refusals exit `2` with an opaque reason.
+
+See [Codex handoff validation](docs/codex-handoff-validation.md) for the API,
+resource bounds and privacy limits.
 
 ### audit
 

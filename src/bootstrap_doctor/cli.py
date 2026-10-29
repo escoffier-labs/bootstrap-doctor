@@ -9,6 +9,7 @@ Subcommands:
     (delegates to ``lint.run``).
   * ``audit``   - parse + heuristics shortlist + LLM judge, render verdicts.
   * ``trim``    - same flow as audit, then build + (optionally) apply a plan.
+  * ``validate-handoff`` - validate explicit local Codex accounting, read-only.
 
 Exit codes:
 
@@ -57,7 +58,7 @@ def _add_common(p: argparse.ArgumentParser) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    """Build the top-level argparse parser with all five subcommands."""
+    """Build the top-level argparse parser with the supported subcommands."""
     root = argparse.ArgumentParser(
         prog="bootstrap-doctor",
         description="Audit and trim OpenClaw bootstrap files.",
@@ -173,6 +174,13 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Emit summary as JSON",
     )
+
+    p_handoff = sub.add_parser(
+        "validate-handoff", help="Validate explicit local Codex handoff accounting"
+    )
+    p_handoff.add_argument("--repo", required=True, help="Absolute local repository")
+    p_handoff.add_argument("--handoff", required=True, help="Local handoff JSON file")
+    p_handoff.add_argument("--json", action="store_true", help="Emit canonical UTF-8 JSON")
 
     return root
 
@@ -678,10 +686,16 @@ def run_trim(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    from bootstrap_doctor.safety import UnsafeTargetError
-
     parser = build_parser()
     args = parser.parse_args(argv)
+
+    # Explicit validation branches before all OpenClaw/config/safety resolution.
+    if args.verb == "validate-handoff":
+        from bootstrap_doctor.handoff import command
+
+        return command(repo=args.repo, handoff=args.handoff, as_json=args.json)
+
+    from bootstrap_doctor.safety import UnsafeTargetError
 
     try:
         if args.verb == "status":
