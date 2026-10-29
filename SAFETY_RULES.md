@@ -1,6 +1,6 @@
 # SAFETY_RULES.md
 
-Hard boundaries. These are not preferences. The content-guard pre-push hook and `brigade scrub` enforce some of these mechanically; the rest are agent-side rules.
+Hard boundaries. These are not preferences. The content-guard pre-push hook and `brigade scrub` enforce some of these mechanically. The rest are agent-side rules.
 
 ---
 
@@ -106,7 +106,7 @@ Before installing anything (even with user approval):
 
 ## Memory Hygiene
 
-- Do not write durable memory entries directly; use the handoff flow.
+- Do not write durable memory entries directly. Use the handoff flow.
 - Do not promote unverified reflections into canonical memory.
 - Stale memory is worse than missing memory. Update or remove entries when their basis changes.
 - Do not load knowledge cards in shared / group contexts that include other people.
@@ -148,7 +148,7 @@ Document the protected paths and what lives there.
 
 ## Personal Workstation Safety
 
-If the workspace shares a network with the user's personal daily driver (different machine, same LAN), treat that machine as **off-limits without explicit confirmation**. Do not restart, kill processes, install software, or modify settings remotely. Read-only access is fine; mutation is not.
+If the workspace shares a network with the user's personal daily driver (different machine, same LAN), treat that machine as **off-limits without explicit confirmation**. Do not restart, kill processes, install software, or modify settings remotely. Read-only access is fine. Mutation is not.
 
 ---
 
