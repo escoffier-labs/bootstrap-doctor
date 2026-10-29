@@ -45,8 +45,10 @@ Refusal exits `2`. The existing OpenClaw commands retain their character units,
 classifications and exit behavior. Validation resolves no configuration,
 selects no replacement instruction chain, invokes no model, performs no network
 access, installs nothing, and writes no instructions, cards, caches or settings.
-CLI interrupts exit `130`. Unexpected command failures exit `3` with a fixed
-stderr diagnostic, including when legacy diagnostic tracing is enabled.
+Interrupts raised during validation exit `130`. Exceptions raised by the command
+before it returns exit `3` with a fixed stderr diagnostic, including when legacy
+diagnostic tracing is enabled. Buffered-output failures during Python shutdown
+occur after this handler and can exit `120`.
 
 The validator requires POSIX nofollow, nonblocking, dirfd and positional-read
 support. It binds every lexical absolute ancestor, the repository's location
