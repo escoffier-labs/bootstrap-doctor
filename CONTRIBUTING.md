@@ -38,4 +38,4 @@ Open an issue before a PR for:
 
 - `trim` stays **dry-run by default**; `--apply` is required to write.
 - **No real bootstrap content** in tests or fixtures; use small synthetic files.
-- Conventional commits, no AI co-authorship trailers.
+- Use conventional commits and follow the [agent attribution rules](AGENTS.md#github-agent-attribution) for contributions made on Solomon's behalf.

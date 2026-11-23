@@ -10,6 +10,22 @@ Before reporting ANY change complete, run it and pass, re-run after your final e
 Report the actual command output. If anything fails, report the failure verbatim and do not claim success.
 Ruff and mypy are configured in pyproject but not installed in the system Python; run them only after installing the `dev` extra in a venv. Never claim a lint or type check passed without having run it. CI runs pytest, ruff, mypy, build, wheel smoke test, and pip-audit on 3.11 and 3.12; do not break configs those steps read.
 
+## GitHub agent attribution
+
+In Solomon's repositories, every issue body, pull request body, and GitHub comment an agent writes or edits on Solomon's behalf ends with this block. Keep the human author identity. Use the actual model, harness, and client. Credit only work performed, include the provider if a model name is ambiguous, and list each review pass. Report the exact checks and observed results above the block. Credit verification to the model that ran the checks.
+
+```text
+Sent on behalf of Solomon by <orchestrator model> via <harness> in <client>
+Models used:
+- Implementation/build: <model> via <harness>, or none
+- Test/verification: <model> via <harness> (checks: listed above), or not run
+- Review: <model> via <harness> for each pass, or none
+```
+
+Every agent-written review comment and review summary also includes `Review by <model> via <harness> in <client>`.
+
+For substantial agent work on commits in this repository, add the applicable `Co-Authored-By` trailer using the agent's verified address. Follow the destination repository's rules when contributing upstream.
+
 ## Project Shape
 - Python 3.11+ CLI that audits OpenClaw bootstrap markdown files against the current per-file and total injection budgets, then relocates oversized sections to `memory/cards/` with one-line breadcrumbs left in the original.
 - Hatchling src layout. Package is `src/bootstrap_doctor/`, console script `bootstrap-doctor` maps to `bootstrap_doctor.cli:main`.

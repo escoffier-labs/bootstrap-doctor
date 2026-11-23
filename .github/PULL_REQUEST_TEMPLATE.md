@@ -21,4 +21,6 @@ Closes #
 - [ ] No real bootstrap content in tests or fixtures (synthetic samples only)
 - [ ] No PII, secrets, home paths, hostnames, or real private IPs in the diff (run content-guard if available)
 - [ ] Updated the `Unreleased` section of `CHANGELOG.md` for any user-visible effect
-- [ ] Conventional commit messages, no AI co-authorship trailers
+- [ ] Conventional commit messages
+
+<!-- For agent-authored or agent-edited PR bodies on Solomon's behalf, list the exact checks and observed results and end with the attribution block in AGENTS.md. -->
