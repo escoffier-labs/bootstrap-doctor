@@ -22,3 +22,5 @@ Closes #
 - [ ] No PII, secrets, home paths, hostnames, or real private IPs in the diff (run content-guard if available)
 - [ ] Updated the `Unreleased` section of `CHANGELOG.md` for any user-visible effect
 - [ ] Conventional commit messages, no AI co-authorship trailers
+
+<!-- If an agent writes or edits this PR body on Solomon's behalf, list the exact checks and observed results, then end the body with the GitHub agent attribution block in AGENTS.md. -->

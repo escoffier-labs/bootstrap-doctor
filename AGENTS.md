@@ -25,6 +25,20 @@ Ruff and mypy are configured in pyproject but not installed in the system Python
 - Pushing? The repo sets `core.hooksPath = hooks`, so `git push` runs `hooks/pre-push`, which runs `brigade guard git` (embedded public-repo policy from `brigade-cli`, plus optional private denylist at `~/.config/content-guard/internal.json`) and blocks on violations. It also blocks any pushed tip that lacks a passing verify receipt; the fix is `./scripts/verify` on that commit, and `SKIP_VERIFY_RECEIPT=1` is the documented escape hatch for WIP backup pushes. Never push with `--no-verify`. On a block: fix the leak, or add an inline `<!-- content-guard: allow <rule-id> -->` tag on the offending line.
 - Tempted to commit local artifacts? `implementation-notes.md`, `memory/`, and `.brigade/` are gitignored. Never commit them, and never delete `memory/cards/` contents.
 
+## GitHub agent attribution
+
+In Solomon's repositories, every issue body, pull request body, and GitHub comment an agent writes or edits on Solomon's behalf ends with this block. Keep the human author identity. Use the actual model, harness, and client. Credit only work performed, include the provider if a model name is ambiguous, and list each review pass. Report the exact checks and observed results above the block. Credit verification to the model that ran the checks.
+
+```text
+Sent on behalf of Solomon by <orchestrator model> via <harness> in <client>
+Models used:
+- Implementation/build: <model> via <harness>, or none
+- Test/verification: <model> via <harness> (checks: listed above), or not run
+- Review: <model> via <harness> for each pass, or none
+```
+
+Every agent-written review comment and review summary also includes `Review by <model> via <harness> in <client>`.
+
 ## Verification
 - `python3 -m pytest` runs everything. Works without an editable install.
 - Targeted change? Run `python3 -m pytest tests/test_<module>.py` while iterating (test files mirror source modules one to one), then the full suite before reporting done.
