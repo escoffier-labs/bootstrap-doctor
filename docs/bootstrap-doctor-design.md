@@ -8,7 +8,7 @@ Named workspaces can carry different bootstrap sets. Each workspace must be meas
 
 Today the operator manages this by hand: noticing a file is too big, picking a section, copying it into `memory/cards/`, leaving a link behind. That doesn't scale and gets skipped.
 
-bootstrap-doctor automates the audit-and-relocate loop, mirroring the design of the existing [memory-doctor](https://github.com/solomonneas/memory-doctor) repo (which handles MEMORY.md compaction). Goal: keep every tracked bootstrap file comfortably under threshold without losing information. Offloaded sections live in `memory/cards/` and are referenced by one-line breadcrumbs in the originals.
+bootstrap-doctor automates the audit-and-relocate loop, mirroring the design of the existing [memory-doctor](https://pypi.org/project/memory-doctor/) package (which handles MEMORY.md compaction). Goal: keep every tracked bootstrap file comfortably under threshold without losing information. Offloaded sections live in `memory/cards/` and are referenced by one-line breadcrumbs in the originals.
 
 ## Recommended approach
 
@@ -129,7 +129,7 @@ bootstrap-doctor/
 
 This is a new standalone repo. Reference points:
 
-- [memory-doctor](https://github.com/solomonneas/memory-doctor) - copy the project structure, config layering, dry-run/atomic-write idioms.
+- [memory-doctor](https://pypi.org/project/memory-doctor/) - copy the project structure, config layering, dry-run/atomic-write idioms.
 - `~/.openclaw/workspace/memory/cards/` - read existing cards to lock in the frontmatter shape before implementing `trim.py`.
 - `~/.openclaw/workspace/AGENTS.md` and `TOOLS.md` - primary fixtures for testing (copy to `tests/fixtures/` for unit tests, never use live files in tests).
 
